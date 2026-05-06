@@ -132,7 +132,7 @@ needed. **One USB image works for the entire Orin family.**
 
 | Year | Module | SoC / GPU | Status | Notes |
 |------|--------|-----------|--------|-------|
-| 2023 | **Jetson AGX Orin** (32/64 GB) | T234 / GA10B Ampere | ✅ Compatible | Same SoC/GPU as NX; more CPU cores, DLA, higher TDP (15–60 W) |
+| 2023 | **Jetson AGX Orin** (32/64 GB) | T234 / GA10B Ampere | ✅ **Tested** | Boots and runs; same SoC/GPU as NX; post-boot display output currently does not work (Talos API/Kubernetes OK), more CPU cores, DLA, higher TDP (15–60 W) |
 | 2023 | **Jetson Orin NX** (8/16 GB) | T234 / GA10B Ampere | ✅ **Tested** | Developed on Orin NX 16 GB (reComputer J4012) |
 | 2023 | **Jetson Orin Nano** (4/8 GB) | T234 / GA10B Ampere | ✅ Compatible | Same SoC/GPU; fewer active CPU cores, lower TDP (7–25 W), no DLA |
 | 2025 | **Jetson AGX Thor** | GB10 / Blackwell | ⚠️ Unknown | Different SoC and GPU architecture (Blackwell); nvgpu OOT driver untested — no OE4T support yet |
