@@ -242,6 +242,17 @@ The two patches add:
   (nvhost_ctrl_shim has no device-tree entry; without explicit loading, CUDA uses CPU polling)
 - **`machine-patch-cdi.yaml`** — CDI support in containerd + Jetson node labels
 
+#### AGX Orin test setup
+
+For the standalone AGX test node at `10.0.10.43`, use the isolated config so the NX setup stays untouched:
+
+```bash
+./scripts/gen-config-agx.sh
+./scripts/apply-config-agx.sh --insecure
+```
+
+This writes `manifests/talos/controlplane-agx.yaml` and `dist/agx/talosconfig`.
+
 #### Boot & Install
 
 1. Plug the USB drive into the Jetson.
@@ -465,6 +476,16 @@ Kubernetes pod via CDI.
 > on JetPack. Each token generation requires one sync call, so this overhead is per-token and
 > unavoidable on Talos without a native nvhost kernel driver. This is the fundamental trade-off
 > of running CUDA on a security-hardened immutable OS.
+
+> **AGX Orin 64GB test note (2026-05-06)**: the standalone AGX test node (`jetson-agx-test`, `controlplane-agx.yaml`) was benchmarked with the same Ollama stack using `num_predict=64`, `temperature=0`, and `keep_alive=0` between runs so models do not accumulate in memory. The AGX-only Ollama deployment was temporarily raised to a 48Gi memory limit so 7B+ models could be loaded sequentially.
+
+| Model | Prompt eval | Decode |
+|-------|-------------|--------|
+| qwen2.5:0.5b | ~617 tok/s | **~44 tok/s** |
+| qwen2.5:7b | ~308 tok/s | **~19 tok/s** |
+| gemma4:e4b | ~172 tok/s | **~14.7 tok/s** |
+| qwen3.5:9b | ~96 tok/s | **~12.6 tok/s** |
+| ministral-3:14b | ~462 tok/s | **~13.4 tok/s** |
 
 > **Community reference**: NVIDIA's official JetPack 6.2 benchmark reports **~20 tok/s** for
 > qwen2.5:7b on Orin NX 16GB using the [MLC inference API](https://developer.nvidia.com/blog/nvidia-jetpack-6-2-brings-super-mode-to-nvidia-jetson-orin-nx-modules/)

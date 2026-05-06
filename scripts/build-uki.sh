@@ -124,7 +124,10 @@ input:
       forceInsecure: ${FORCE_INSECURE}
 customization:
   extraKernelArgs:
+    # Serial console for UART debug.
     - console=ttyTCU0,115200
+    # Local console on the active framebuffer/DRM device (HDMI or DP).
+    - console=tty0
     - firmware_class.path=/usr/lib/firmware
 output:
   kind: uki

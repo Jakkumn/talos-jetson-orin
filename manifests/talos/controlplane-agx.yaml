@@ -1,0 +1,137 @@
+version: v1alpha1
+debug: false
+persist: true
+machine:
+    type: controlplane
+    token: vjkrwu.64gewt8jghhbezvz
+    ca:
+        crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJQekNCOHFBREFnRUNBaEVBNmp3RmtjYlUrNmtOZE15RjRFRzltVEFGQmdNclpYQXdFREVPTUF3R0ExVUUKQ2hNRmRHRnNiM013SGhjTk1qWXdOVEEyTVRReE5ERTRXaGNOTXpZd05UQXpNVFF4TkRFNFdqQVFNUTR3REFZRApWUVFLRXdWMFlXeHZjekFxTUFVR0F5dGxjQU1oQUFiTjZ0V0xYb1dYbjROWlZRVVNvZkgrRE9wRDduWEFWdktHCnRHSVdUcUZ6bzJFd1h6QU9CZ05WSFE4QkFmOEVCQU1DQW9Rd0hRWURWUjBsQkJZd0ZBWUlLd1lCQlFVSEF3RUcKQ0NzR0FRVUZCd01DTUE4R0ExVWRFd0VCL3dRRk1BTUJBZjh3SFFZRFZSME9CQllFRk8rcXJzcUlNVmVLelF3aQoyQ3FyM1pBbVBhNnhNQVVHQXl0bGNBTkJBSjNHU0ptSzc4UkVVVCtmRldKMXUxQytBcHBCY1QwWi94WkdyeFZOClBaSjVpTFJXVnF0aTNRdlZOQTFoUkNVRVBoRkFYSXFEdk1kYjMwdlpzWU1WR3dvPQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+        key: LS0tLS1CRUdJTiBFRDI1NTE5IFBSSVZBVEUgS0VZLS0tLS0KTUM0Q0FRQXdCUVlESzJWd0JDSUVJSHRUa201L2pXM0JvMmphRTd2cnpXVEcrSFFWYkJEbEhtNGhFZTJJZkwxeAotLS0tLUVORCBFRDI1NTE5IFBSSVZBVEUgS0VZLS0tLS0K
+    certSANs: []
+    kubelet:
+        image: ghcr.io/siderolabs/kubelet:v1.35.2
+        defaultRuntimeSeccompProfileEnabled: true
+        disableManifestsDirectory: true
+    network: {}
+    install:
+        disk: /dev/nvme0n1
+        image: ghcr.io/schwankner/custom-installer:v1.13.0-6.18.24-nvgpu5.10.10
+        wipe: true
+    files:
+        - content: |
+            version = 3
+
+            disabled_plugins = [
+                "io.containerd.differ.v1.erofs",
+                "io.containerd.internal.v1.tracing",
+                "io.containerd.snapshotter.v1.blockfile",
+                "io.containerd.snapshotter.v1.erofs",
+                "io.containerd.ttrpc.v1.otelttrpc",
+                "io.containerd.tracing.processor.v1.otlp",
+            ]
+
+            imports = [
+                "/etc/cri/conf.d/cri.toml",
+            ]
+
+            [debug]
+            level = "info"
+            format = "json"
+
+            # CDI support for nvidia.com/gpu extended resource.
+            # Spec dir /var/run/cdi is populated by the nvidia-cdi-setup DaemonSet.
+            # enable_cdi must be set explicitly — Talos builds containerd with CDI
+            # disabled in the default config.
+            [plugins."io.containerd.cri.v1.runtime"]
+              enable_cdi = true
+              cdi_spec_dirs = ["/var/run/cdi"]
+          permissions: 0o644
+          path: /etc/cri/containerd.toml
+          op: overwrite
+    features:
+        diskQuotaSupport: true
+        kubePrism:
+            enabled: true
+            port: 7445
+        hostDNS:
+            enabled: true
+            forwardKubeDNSToHost: true
+    kernel:
+        modules:
+            - name: host1x
+            - name: host1x_fence
+            - name: nvhost_ctrl_shim
+            - name: nvmap
+            - name: mc_utils
+            - name: nvgpu
+            - name: governor_pod_scaling
+    nodeLabels:
+        accelerator: jetson-orin
+        node.kubernetes.io/exclude-from-external-load-balancers: ""
+        nvidia.com/gpu.type: igpu
+cluster:
+    id: rbJ1q8Fv7nS2ChoXmdfcqabswQXq5XCoTj-ZFhq31RY=
+    secret: aivdPzj804IIuLkSYE6HArVmrm6JRW6GNNM/YMPz7YE=
+    controlPlane:
+        endpoint: https://10.0.10.43:6443
+    clusterName: jetson-agx-test
+    network:
+        dnsDomain: cluster.local
+        podSubnets:
+            - 10.244.0.0/16
+        serviceSubnets:
+            - 10.96.0.0/12
+    token: 3mntym.fe0ccjd0w5ep42jp
+    secretboxEncryptionSecret: JkEZh3/zwXs+P3+8sAG1NqVRmjMN/bp44+V0xa+dYMM=
+    ca:
+        crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJpakNDQVMrZ0F3SUJBZ0lRQWdyNy9wTm02SHIrS3JiYVZlMjgyekFLQmdncWhrak9QUVFEQWpBVk1STXcKRVFZRFZRUUtFd3ByZFdKbGNtNWxkR1Z6TUI0WERUSTJNRFV3TmpFME1UUXhPRm9YRFRNMk1EVXdNekUwTVRReApPRm93RlRFVE1CRUdBMVVFQ2hNS2EzVmlaWEp1WlhSbGN6QlpNQk1HQnlxR1NNNDlBZ0VHQ0NxR1NNNDlBd0VICkEwSUFCTXI1RVltNjFzaTJjM1JTNUp0VVEydXVWMDFOam44b2RTanROU2VCNXAyakNSTmpRSVlrRk9KN3dmM1AKYnZmM3FjbzU2SHJXMjl1WmtVOWdXS2FDU2ppallUQmZNQTRHQTFVZER3RUIvd1FFQXdJQ2hEQWRCZ05WSFNVRQpGakFVQmdnckJnRUZCUWNEQVFZSUt3WUJCUVVIQXdJd0R3WURWUjBUQVFIL0JBVXdBd0VCL3pBZEJnTlZIUTRFCkZnUVVBTkVOSlFXaVZmTGVTeUpNTG04SXlhalArMkl3Q2dZSUtvWkl6ajBFQXdJRFNRQXdSZ0loQUtkWE5aODUKMmNpbVZZeExmcktrS3JnbStUdk5ad3NxdkhDdVRGb2hPY1FyQWlFQXNtS1NWRlZrSXltdHBma2JGN1k1L3lIMgpUeTh4QmREbWhkMWNBMFJhcWE4PQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+        key: LS0tLS1CRUdJTiBFQyBQUklWQVRFIEtFWS0tLS0tCk1IY0NBUUVFSU03RHBMd2N2VEIrWURNZ1gzWHYvenlHeWZjZUZiOWN6dFV4YkJrdTRZVnFvQW9HQ0NxR1NNNDkKQXdFSG9VUURRZ0FFeXZrUmlicld5TFp6ZEZMa20xUkRhNjVYVFUyT2Z5aDFLTzAxSjRIbW5hTUpFMk5BaGlRVQo0bnZCL2M5dTkvZXB5am5vZXRiYjI1bVJUMkJZcG9KS09BPT0KLS0tLS1FTkQgRUMgUFJJVkFURSBLRVktLS0tLQo=
+    aggregatorCA:
+        crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJZVENDQVFhZ0F3SUJBZ0lSQVA5RDBCU3JZVmZYMzR4MHRMY0pYRVl3Q2dZSUtvWkl6ajBFQXdJd0FEQWUKRncweU5qQTFNRFl4TkRFME1UaGFGdzB6TmpBMU1ETXhOREUwTVRoYU1BQXdXVEFUQmdjcWhrak9QUUlCQmdncQpoa2pPUFFNQkJ3TkNBQVN2TGVkMDRZN0xOcWNLUmRia1ZYM2F1bUdrWHVUaG9xeUxWdWRtOXRqcXZMQkhrTmZDCm9DcGh3eVowaXJoVUU1WDNtNVNSM1J2eXpYbEtmdGJjaHp4dW8yRXdYekFPQmdOVkhROEJBZjhFQkFNQ0FvUXcKSFFZRFZSMGxCQll3RkFZSUt3WUJCUVVIQXdFR0NDc0dBUVVGQndNQ01BOEdBMVVkRXdFQi93UUZNQU1CQWY4dwpIUVlEVlIwT0JCWUVGRkk0ZUc2QVJCQlNnZ3NzUTV6d0F1emg0ZHNhTUFvR0NDcUdTTTQ5QkFNQ0Ewa0FNRVlDCklRRFNBcW9HRnZhNm54QUhoY3JNRVdjTWFlSG5Sa1FkY0NyVUlvSWRsK2Z2a1FJaEFLNmM1TERmcU9zVWxJSm8KTCtlQmNyczN3KzRwZDhBS0o4Q0FRTDVyQW85cQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+        key: LS0tLS1CRUdJTiBFQyBQUklWQVRFIEtFWS0tLS0tCk1IY0NBUUVFSU0ya1lWOFpQa2hvTE1JUDJLNUZHejhvVWhxQUJhK1luMzdMdlhqVXh2QmxvQW9HQ0NxR1NNNDkKQXdFSG9VUURRZ0FFcnkzbmRPR095emFuQ2tYVzVGVjkycnBocEY3azRhS3NpMWJuWnZiWTZyeXdSNURYd3FBcQpZY01tZElxNFZCT1Y5NXVVa2QwYjhzMTVTbjdXM0ljOGJnPT0KLS0tLS1FTkQgRUMgUFJJVkFURSBLRVktLS0tLQo=
+    serviceAccount:
+        key: LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlKSndJQkFBS0NBZ0VBc3BBZUpaZkhEOFVZWVJJK3pXT3lWUU1wVHlQRUx2MkNXUFN4SDBsL0FMczZ3MExvCndLL3I4UlE2N0k3TnhnQXJNZzVaZEovZVVaSm1yNkhmTDVvVmR1RGd1bG03N09WV0NSL2hENGlnMG5PdURncUsKcTBveUlZb1B6U2lrTU14REFiR1J5TFFDODlOSXRWTFhnYmhxb01Sa08yRVB3d1lDMEVHZFQ3aXlpUU54elJWawo4Ky9KcUlFcVlGdElsdC9XMFpOU3doNjRNQkhWN3JIY3BEL1R6OE9rUVJSZjNKV3pNRGRzZllKMkZOazNOcUYxCjZua2QvTU4wangyWHVoWUtDajFYWStrNmxTcmYwSUpPRytHS3lzYzJNOHpBclVHa3FPV2NZYzF5eWkvRkNEeXgKc21zQWYwV21Gb1M3K3dtTGNlamVYbnp6YS93RG5wKzhERmFzK3A0MXlTVGVYK3VqaXluV0ZHUjZKZjMzY1FPTQp5VjNMTzQ2cFJQc3ZSOExRZnluODRnZWxRV3lpY0tINm9lazQyRWpnZVhnejZTcThaMHErSEpYYUlkbTQxek1xCnA2SUM5dDlYN0RhUHJDT00rQnBiMytlZitJOGtiVmFOb2thN0UvWkVkeEZ5WWh0dGpSMDFrbW1zNTRkMUdPRHUKOVJSQzkvaTZBaXluQWdiRkk1V2hyR1hjUjBpQ1FrbnFUZ281U2tmYzJXKzVCQzAwSFFYNEhOcHJWRmYrSFl5VwpGRlJ2elhpQ0hqd1hOd2RlMEsydk52a0FvTVl0d3NkWjVoZzdnM2dkZysyUDRsYkIzRGtGVEVrbjZUQ0V6RE9sCnorWmJvWFN4Y3FsSXoxSmdNWmI1UThIM1d2NWl4STAxWDFNcmR1d09VNGIwRlhDNzZMUk94KytoZGJNQ0F3RUEKQVFLQ0FnQTdQaHg2Ylg1aWFZcDZubEtPMDA1MTdSd1dBVEJVUk5DcjBkYzRJYXJNNDlHTnVoTzk1a0FhRnBPcwpLMzd5KzloWS9iREpSRWMrK2hzdWx6NlVyUU1GRTN3TDU3eTFUcXQ2VUlUYm9nRjFnV0xVanNQT0s4b3hIWHk3Cm5RbklsT1NBV2RrYjVUbDdpdlI3RUZhbTE3Z3N5YXZWbFpEa3JBaGY3djBSMTU0SVhrZXgrckNwVER1ME45S0cKOEpKSFdGR042OXFQeENCbzltbnJqVUEra0Z5bWVHcjFHcHpwY3hObDRtV1F5S21EcGtPdTBPZnQyS3hOMGMxSQp0RkZFTUk2NU1mdmVEcUhjbnNKdUMrVjlVNW00U0ZyZjJjVnRWak9hdzc5Y0pZMDVycHFvN25Zb1UxN3hXdnJOClN0R1JhdXZFYWJYcFZIeHdyY2JIcUloNzhYL25BcFd6bitNS0gzT0w2cDN1ZlN2V3BmMCtwTXFkZnhvd3Y5eisKTVlpN3dic0hza1lsQW5zeFErUUEzblEzbDY0aGFwYzdMQnpEOURRc09tdTB6b3Bud211OWp2Y1FMaE5zMmNZSQoyMUtFUXVyNU53UWdOVzJEbTUyQ2VMbnN6Y0RlWW1sT3NMNmMvcFI1KzE1dkJ6dnFTVTEwOG5qak5VR1AwK24wCnFQQ3RzVWJiNURGZG03eUlXNXRKTk9pQ3NLRVQ5c0UxQytYOS9OeDJnSUFNRzJXUTVWMEswVmhBWFFrY0pjL2UKdlgxYUlSbGpRdk8wU3BxVEg5ZXdIRWIrRzYxVVBBNzh5TTNSRnlBaUpuMEJSQ2xJTnNIeEhpTjJrZHY3TlBvOApIcFB2WjA1ZllvcHBhK0dMcy9KcXhHbzBXMmZoWVZyMVdTZmpja09GbUFYU0RpVms3UUtDQVFFQTJWTUFWZkNHCm14T3F6bHBFNjBvNnI0aUgyUkhkMmpOOGZhSFhScUMxRXFrakhkQ2dmVTZzY1dLb1pHWXhLWjg1M0pnTjRDcncKMFRsSDhZNzZzanJhditIcVYzUHhKSDkxaVpqMm1RekxNNGFTcjJpSlhKZElKVUVXcXZ4alBxakxyTENaMlFTLwpCV3RNZUJGMVNNU25qMnU3a3c5dTNKcFlXMnhsajJtMkY1cjdqUVQ0OWRtTFk2eEdHa3JnNk5QREl2YXg3U1l0CjhnVk5Ma3lkS3J3TkQzbzVCRGJ6MnJEdS9JVFZBMVVSVXpmNWtESTVuTzZpcG53WWV5VEpxbDBIbjFqYk90SXcKbFNyVksrSGQ4azNEaUt4OXNWV1owSGN6ZGZOQytRbU54NDgxTlF2MUNXbEtZaGVIYnlBenpTdGhtOFBacTc4QgpBZ1dxYW1mSnJmeEVyUUtDQVFFQTBsYzBuTkFNdVhDR1Z4SC80cWJMTlNVTm9PSnhNSFo3VUlQMnBtWmwzMGU4CjU5amlNaTVGbzFDSjlXSUdjZ3pudGhRS3pINUNIaUxpdFFseE9vL2tWd0RxaDlHN1RGV0FKNzNuZHczZGpDMEoKSVZsN3c4ckE1U3NhalIyM2t1THIydTYvMzhCbkkyUE80TmNjQ3h2b0RYZTF2SjR0c2hicSs5R05XRlNNU0pjNApMam5SQjRTZEdxek5tZktvcVlVckg1Wk5VRjdQZkpMK3p0UE1kUGV3VVJISlVidzM4V082SzJNTGdBWHFOODluCnNRQWduN3Fpc05SdGJDcHdpYnRzUllURmJhYnhiRDJBNDZ0NmJjZmROa1pQSjlnQmd5KzBJQTZkNFU2amRHL3oKZ3hvQnJUd25uRU5YalNIR3dHbVQyUlcwUlJLMG11WVJ5aXBRWERtUDN3S0NBUUFPeVVudGp2YnBtRFgzNGtacwpKOW5FVmFyQWh5bXNEZks3YllhREpLNE5QZnJJcllndDNtdDNMM283a29Sbnk1Q1pSTE0wL0ZiME5VeUN6L0tZCnE4NTBYYitmQWFGM2xVQi9BeXhNRDRYSDFMRW9SQm1NZGpLUGJsVkhmdktWc2RCaHlJWS9NTVo2Yk9tQUJkZ1EKQW1sUUpjbFdZU2R1MVFXTCt0MFNHK1FxeVAyeWc1TVl6eHRmeGJualVoTHBaSGNUYXV1Q01pWFFJTEkyb3puUwpUWWNwOVd2cHNIOTQ4cTdmK1gyd3cxbnhhbzZOVkExOWN2TVlGcnRucllJWEdFdExlVFU1VkZHLzVIRXFraXlTCnJ0M043OGFCaVV4MDFaZG53QXhmZTFudEtQNDZ4THlBVG15a0xldW1FTy9WVnMxR1Z0WDVqSDVhRDk2ZmJMNVoKR3gvbEFvSUJBSFhrSXJ6eGJ2QlF2VHIzLzYrTlJML1lzTGJIdENFeGh4UXRvb1RKUjdmSmdYdUE5K2FnUUsrMAphRjU4UHBpVjJ4a1dTcWNxN092dktabkdYUXd4c2cyQm1mSGQvMWhkWTZMaXNXVHRCSXVZZ2xHSzBlOS9LSFpKCm5td1JoOTV3Q1RtQUwxSzlpQkV4MDdYNVd1SnZGYlRXcjZtMERuQ09uODNjT1ppVWFyd1U1WXdqSTZGUEZxN28KdzZQUmVlN3BrSzMzbEFYRDNnODRaRkNRTFR3eHgwVG83eWs4a1M1ZWN1MzJhVytyNFFhKzNLTThLd3pia213Qgo1QUtJRnVOYmhPZkI3dFh5aDhYZkF1cVlKZHA1OXVhQXFjVHZNSW5TcHVhQXlzU0pTdHZzRTFRYnMyemhGbUppCjdDTlNGdytwSFJERE5YS3hkVUNNU3RSQXV5RzFzWWtDZ2dFQUJoUW95Uy9XeWZhQ0lZdVRXWkFqTGFpVVZGeEEKajRtZ3BEa2RaWGsveU9oU3hYWUpzc2tqbXRHTEswVHBDeFlsaUw1U0dCYVRkT1cybkRuTHVIOHFNWjh1cm5oeQpyUkhRQUZDOXYwcFhNem53OVo4SWpSbjVLak80MWRNUElpUkthNmora2RrU3IySDVsMUVJbFB0UC8zeFRoSDBsCk1yaWYxamxRZVVxMksyUUgvVHBLL29iVjZiRGR1THRRSW1CN3prYW1vNmk1d0l6M2RZNTlRVWtzRklQN01KdTAKSGpPa1ZXaTlxbUhuODM1R1JkbmxOOHVJQ3FqSzk4VlZoVWxpRVUvcnJxaVJKcFhuSGx1dmd0ZVcrVm1Wd2ZGTAoxMml2S1JIblZqTHM5djZEVW95VWxpSmtqVS9lVmhWQ2pOOGQyRkQzRjAzc2pUNVBTWFRoRmthSGRnPT0KLS0tLS1FTkQgUlNBIFBSSVZBVEUgS0VZLS0tLS0K
+    apiServer:
+        image: registry.k8s.io/kube-apiserver:v1.35.2
+        admissionControl:
+            - name: PodSecurity
+              configuration:
+                apiVersion: pod-security.admission.config.k8s.io/v1alpha1
+                defaults:
+                    audit: restricted
+                    audit-version: latest
+                    enforce: baseline
+                    enforce-version: latest
+                    warn: restricted
+                    warn-version: latest
+                exemptions:
+                    namespaces:
+                        - kube-system
+                    runtimeClasses: []
+                    usernames: []
+                kind: PodSecurityConfiguration
+        auditPolicy:
+            apiVersion: audit.k8s.io/v1
+            kind: Policy
+            rules:
+                - level: Metadata
+    controllerManager:
+        image: registry.k8s.io/kube-controller-manager:v1.35.2
+    proxy:
+        image: registry.k8s.io/kube-proxy:v1.35.2
+    scheduler:
+        image: registry.k8s.io/kube-scheduler:v1.35.2
+    discovery:
+        enabled: true
+        registries:
+            kubernetes:
+                disabled: true
+            service: {}
+    etcd:
+        ca:
+            crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJmVENDQVNPZ0F3SUJBZ0lRU1N3VVhhQy9EVGo5bmsrK2tDYmc3VEFLQmdncWhrak9QUVFEQWpBUE1RMHcKQ3dZRFZRUUtFd1JsZEdOa01CNFhEVEkyTURVd05qRTBNVFF4T0ZvWERUTTJNRFV3TXpFME1UUXhPRm93RHpFTgpNQXNHQTFVRUNoTUVaWFJqWkRCWk1CTUdCeXFHU000OUFnRUdDQ3FHU000OUF3RUhBMElBQkJUZDdDUXB5WDNqCjZrQnRSL0NVdWRoRWRQWHl2Vi8zV0c1eDgrOHFwSGJUc1NlaEtuUkdLa3lKR2VjeWJBNEtEa1BnUXVyTm5zL0wKczNxclJ5NHFFWldqWVRCZk1BNEdBMVVkRHdFQi93UUVBd0lDaERBZEJnTlZIU1VFRmpBVUJnZ3JCZ0VGQlFjRApBUVlJS3dZQkJRVUhBd0l3RHdZRFZSMFRBUUgvQkFVd0F3RUIvekFkQmdOVkhRNEVGZ1FVaFYzTDdJSkdvWGkxCk9DclhndC8rdk1rNURKMHdDZ1lJS29aSXpqMEVBd0lEU0FBd1JRSWdQMzJYTzZEM0NLNzZmRzFuQnRWcElJNXoKdnlsNTZ0c3RqdzJJTng4VzJCNENJUUMzNk4va053UFVsa0dObFVrQzFvT1h2V2ExSGkzQ3liZ1QzRHNMMmNoSwpJUT09Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+            key: LS0tLS1CRUdJTiBFQyBQUklWQVRFIEtFWS0tLS0tCk1IY0NBUUVFSUE5eE5sWjhseEhNd3E4dDdKM0dIcVJtVUdLRnJhT09rMjF1YjI2RWtFaUpvQW9HQ0NxR1NNNDkKQXdFSG9VUURRZ0FFRk4zc0pDbkpmZVBxUUcxSDhKUzUyRVIwOWZLOVgvZFlibkh6N3lxa2R0T3hKNkVxZEVZcQpUSWtaNXpKc0Rnb09RK0JDNnMyZXo4dXplcXRITGlvUmxRPT0KLS0tLS1FTkQgRUMgUFJJVkFURSBLRVktLS0tLQo=
+---
+apiVersion: v1alpha1
+kind: HostnameConfig
+auto: stable

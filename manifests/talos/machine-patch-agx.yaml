@@ -1,0 +1,20 @@
+# Talos machine config patch — AGX Orin test setup
+#
+# This is the AGX-specific install patch. It keeps the same GPU module stack
+# as the generic Orin patch, but forces a clean install on the AGX test node.
+#
+# Use this only for the AGX test machine at 10.0.10.43.
+machine:
+  install:
+    disk: /dev/nvme0n1
+    image: ghcr.io/schwankner/custom-installer:v1.13.0-6.18.24-nvgpu5.10.10
+    wipe: true
+  kernel:
+    modules:
+      - name: host1x
+      - name: host1x_fence
+      - name: nvhost_ctrl_shim
+      - name: nvmap
+      - name: mc_utils
+      - name: nvgpu
+      - name: governor_pod_scaling
