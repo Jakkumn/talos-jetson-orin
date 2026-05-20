@@ -22,14 +22,17 @@ PKGS_COMMIT="${PKGS_COMMIT:-f3829f74}"   # latest commit on release-1.13 (2026-0
 PKGS_BRANCH="${PKGS_BRANCH:-release-$(echo "${TALOS_VERSION}" | sed 's/^v//' | cut -d. -f1,2)}"
 
 # ── Kernel version — derived automatically from siderolabs/pkgs ──────────────
-# Reads linux_version from the same Pkgfile Talos uses to build its own kernel.
-# This guarantees KERNEL_VERSION always matches what Talos ships internally.
+# Reads linux_version from the PINNED PKGS_COMMIT (not the branch HEAD!) so
+# the kernel build inside the container matches what we expect. If we read
+# from the branch HEAD and siderolabs bumps the kernel mid-release, our
+# build container ships kernel X but the post-build path check looks for
+# kernel Y → "[ERROR] nvgpu.ko not found in build output" (run #26171068759).
 # Override via env: KERNEL_VERSION=6.x.y source scripts/common.sh
 if [ -z "${KERNEL_VERSION:-}" ]; then
   KERNEL_VERSION="$(curl -fsSL \
-    "https://raw.githubusercontent.com/siderolabs/pkgs/${PKGS_BRANCH}/Pkgfile" \
+    "https://raw.githubusercontent.com/siderolabs/pkgs/${PKGS_COMMIT}/Pkgfile" \
     | grep '^\s*linux_version:' | head -1 | sed 's/.*linux_version:\s*//' | tr -d ' ')"
-  [ -z "${KERNEL_VERSION}" ] && { echo "[ERROR] Could not determine kernel version from pkgs/${PKGS_BRANCH}" >&2; exit 1; }
+  [ -z "${KERNEL_VERSION}" ] && { echo "[ERROR] Could not determine kernel version from pkgs@${PKGS_COMMIT}" >&2; exit 1; }
 fi
 
 # ── LLVM (Talos 1.13+) ──────────────────────────────────────────────────────
