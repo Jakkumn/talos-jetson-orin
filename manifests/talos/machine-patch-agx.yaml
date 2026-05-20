@@ -7,13 +7,13 @@
 machine:
   install:
     disk: /dev/nvme0n1
-    image: ghcr.io/schwankner/custom-installer:v1.13.0-6.18.24-nvgpu5.10.10
+    image: ghcr.io/schwankner/custom-installer:v1.13.0-6.18.24-nvgpu5.10.11-noshim
     wipe: true
   kernel:
     modules:
       - name: host1x
       - name: host1x_fence
-      - name: nvhost_ctrl_shim
+      # nvhost_ctrl_shim REMOVED in this build variant (feat/no-shim-test)
       - name: nvmap
       - name: mc_utils
       - name: nvgpu
