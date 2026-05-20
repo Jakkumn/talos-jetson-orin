@@ -33,18 +33,18 @@
 machine:
   install:
     disk: /dev/nvme0n1
-    image: ghcr.io/schwankner/custom-installer:v1.13.0-6.18.24-nvgpu5.10.11-noshim
+    image: ghcr.io/schwankner/custom-installer:v1.13.0-6.18.24-nvgpu5.10.10
     wipe: false
   kernel:
     modules:
-      # Load order matters: host1x → host1x-fence → nvmap → nvgpu
-      # host1x: OE4T syncpoint allocator (prerequisite for nvgpu)
+      # Load order matters: host1x → host1x-fence → nvhost-ctrl-shim → nvmap → nvgpu
+      # host1x: OE4T syncpoint allocator (prerequisite for nvhost-ctrl-shim and nvgpu)
       - name: host1x
       # host1x-fence: fence extraction for GPU/CPU sync (required by nvgpu)
       - name: host1x_fence
-      # nvhost_ctrl_shim REMOVED in this build variant (feat/no-shim-test)
-      # CDI setup will create /dev/nvhost-ctrl as a symlink → /dev/nvgpu/igpu0/ctrl
-      # as fallback if libcuda.so opens nvhost-ctrl during cuInit.
+      # nvhost-ctrl-shim: provides /dev/nvhost-ctrl with SYNCPT_WAITMEX ioctl
+      # MUST load before nvgpu so the device exists when libcuda.so opens it at cuInit
+      - name: nvhost_ctrl_shim
       # nvmap: GPU memory allocator (required by nvgpu)
       - name: nvmap
       # mc-utils: memory controller bandwidth helper (required by nvgpu)
