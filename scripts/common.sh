@@ -41,7 +41,7 @@ fi
 LLVM_IMAGE="${LLVM_IMAGE:-ghcr.io/siderolabs/llvm}"  # informational only
 
 # ── Extension versions ───────────────────────────────────────────────────────
-NVGPU_VERSION="${NVGPU_VERSION:-5.10.11}"        # .../ 5.10.10 (chore: remove dead GCC_PLUGIN_LATENT_ENTROPY code from nvgpu build) / 5.10.11 (feat: replace #if 1 force-hacks with LINUX_VERSION_CODE guards; use confirmed path generated/uapi/linux/version.h)
+NVGPU_VERSION="${NVGPU_VERSION:-5.11.0-drm}"     # .../ 5.10.11 (LINUX_VERSION_CODE guards) / 5.11.0-drm (feat: add OE4T tegra-drm.ko + host1x-nvhost.ko build — fixes /dev/dri missing → cuInit 801 NOT_SUPPORTED)
 FIRMWARE_EXT_TAG="${FIRMWARE_EXT_TAG:-v5}"        # v1 / v2 / v3 / v4 / v5 (pmu_pkc_prod_sig.bin added)
 KERNEL_MODULES_VERSION="${KERNEL_MODULES_VERSION:-1.3.0}"
 

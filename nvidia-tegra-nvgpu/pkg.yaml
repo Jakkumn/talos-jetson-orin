@@ -230,6 +230,64 @@ steps:
         cat ${NVIDIA_OOT}/drivers/gpu/host1x-fence/Module.symvers \
           >> /oot-src/out/nvidia-linux-header/Module.symvers.nvidia 2>/dev/null || true
 
+        # ── host1x-nvhost: legacy /dev/nvhost-* device nodes (bridge layer) ──
+        # OE4T host1x-nvhost.ko provides /dev/nvhost-ctrl-* style devices.
+        # See OE4T/linux-nv-oot drivers/gpu/host1x-nvhost/.
+        echo "=== Building OOT host1x-nvhost ==="
+        sed -i 's|ccflags-y += -Werror||g' \
+          ${NVIDIA_OOT}/drivers/gpu/host1x-nvhost/Makefile
+        printf 'ccflags-y += -I$(srctree.nvconftest)\n' \
+          >> ${NVIDIA_OOT}/drivers/gpu/host1x-nvhost/Makefile
+        printf 'ccflags-y += -I$(srctree.nvidia-oot)/include\n' \
+          >> ${NVIDIA_OOT}/drivers/gpu/host1x-nvhost/Makefile
+        printf 'ccflags-y += -I$(srctree.nvidia-oot)/drivers/gpu/host1x/include\n' \
+          >> ${NVIDIA_OOT}/drivers/gpu/host1x-nvhost/Makefile
+        make -j $(nproc) ARCH=arm64 \
+          -C /src \
+          M=${NVIDIA_OOT}/drivers/gpu/host1x-nvhost \
+          CC=/usr/local/bin/clang-oot \
+          CONFIG_TEGRA_OOT_MODULE=m \
+          srctree.nvidia-oot=${NVIDIA_OOT} \
+          srctree.nvconftest=${NVIDIA_CONFTEST} \
+          LLVM=1 \
+          KBUILD_EXTRA_SYMBOLS=/oot-src/out/nvidia-linux-header/Module.symvers.nvidia \
+          modules 2>&1 | tee /tmp/build-host1x-nvhost.log; [[ ${PIPESTATUS[0]} -eq 0 ]] && echo "host1x-nvhost: OK" || { echo "host1x-nvhost: BUILD FAILED (see errors above)"; exit 1; }
+        cat ${NVIDIA_OOT}/drivers/gpu/host1x-nvhost/Module.symvers \
+          >> /oot-src/out/nvidia-linux-header/Module.symvers.nvidia 2>/dev/null || true
+
+        # ── tegra-drm: OE4T DRM driver compatible with patched host1x ABI ──
+        # The vanilla Talos kernel ships tegra-drm.ko built against vanilla
+        # host1x ABI, which is INCOMPATIBLE with our OE4T host1x.ko (different
+        # symbol versions for host1x_job_alloc, host1x_syncpt_get_by_id, etc.).
+        # Build OE4T's tegra-drm so that /dev/dri/renderD128 is created and
+        # libcuda can enumerate the iGPU. Without this, cuInit returns 801
+        # (CUDA_ERROR_NOT_SUPPORTED) and Ollama falls back to CPU.
+        # Headless build: CONFIG_DRM_TEGRA_HAVE_DISPLAY=n (no DP/DSI/HDMI).
+        echo "=== Building OOT tegra-drm (headless / render-node only) ==="
+        sed -i 's|ccflags-y += -Werror||g' \
+          ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Makefile 2>/dev/null || true
+        printf 'ccflags-y += -I$(srctree.nvconftest)\n' \
+          >> ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Makefile
+        printf 'ccflags-y += -I$(srctree.nvidia-oot)/include\n' \
+          >> ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Makefile
+        printf 'ccflags-y += -I$(srctree.nvidia-oot)/drivers/gpu/host1x/include\n' \
+          >> ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Makefile
+        make -j $(nproc) ARCH=arm64 \
+          -C /src \
+          M=${NVIDIA_OOT}/drivers/gpu/drm/tegra \
+          CC=/usr/local/bin/clang-oot \
+          CONFIG_TEGRA_OOT_MODULE=m \
+          CONFIG_DRM_TEGRA_HAVE_DISPLAY=n \
+          CONFIG_DRM_FBDEV_EMULATION=n \
+          srctree.nvidia-oot=${NVIDIA_OOT} \
+          srctree.nvconftest=${NVIDIA_CONFTEST} \
+          srctree.hwpm=/oot-src/hwpm \
+          LLVM=1 \
+          KBUILD_EXTRA_SYMBOLS=/oot-src/out/nvidia-linux-header/Module.symvers.nvidia \
+          modules 2>&1 | tee /tmp/build-tegra-drm.log; [[ ${PIPESTATUS[0]} -eq 0 ]] && echo "tegra-drm: OK" || { echo "tegra-drm: BUILD FAILED (see errors above)"; exit 1; }
+        cat ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Module.symvers \
+          >> /oot-src/out/nvidia-linux-header/Module.symvers.nvidia 2>/dev/null || true
+
         # ── nvhost-ctrl-shim: provides /dev/nvhost-ctrl with NVHOST ioctl API ──
         # Bridges NVHOST_IOCTL_CTRL_SYNC_FENCE_CREATE / SYNC_FILE_EXTRACT to the
         # OOT host1x syncpoint kernel API so libnvrm_host1x.so (JetPack 6 CUDA
@@ -425,12 +483,21 @@ steps:
         # host1x provides syncpoint alloc; host1x-fence provides fence extract;
         # nvmap provides GPU memory; mc-utils provides emc_freq_to_bw; nvgpu last.
         mkdir -p /rootfs/usr/lib/modprobe.d
-        # Load order: host1x → host1x-fence → nvhost-ctrl-shim → nvmap → nvgpu
-        # nvhost-ctrl-shim depends on host1x (syncpoint API), must load before nvgpu
-        # so /dev/nvhost-ctrl exists when libcuda.so opens it during cuInit.
+        # Load order:
+        #   host1x → host1x-fence → host1x-nvhost → nvhost-ctrl-shim → tegra-drm → nvmap → nvgpu
+        #
+        # tegra-drm depends on host1x ABI (OE4T-patched, not vanilla). It must
+        # load before nvgpu so /dev/dri/renderD128 exists when libcuda enumerates
+        # the iGPU; without it cuInit returns 801 (CUDA_ERROR_NOT_SUPPORTED).
+        # host1x-nvhost provides /dev/nvhost-ctrl-* device nodes (gpu, isp, vi,
+        # pva, nvdla, nvcsi variants) — JetPack6 libnvrm_host1x.so opens some.
+        # nvhost-ctrl-shim provides the plain /dev/nvhost-ctrl (legacy) for
+        # CUDA runtimes that still expect it; same role as on Orin NX.
         printf 'softdep nvhost-ctrl-shim pre: host1x host1x-fence\n' \
           > /rootfs/usr/lib/modprobe.d/nvidia-tegra.conf
-        printf 'softdep nvgpu pre: host1x nvmap host1x-fence nvhost-ctrl-shim mc-utils\n' \
+        printf 'softdep tegra-drm pre: host1x host1x-fence host1x-nvhost\n' \
+          >> /rootfs/usr/lib/modprobe.d/nvidia-tegra.conf
+        printf 'softdep nvgpu pre: host1x nvmap host1x-fence host1x-nvhost nvhost-ctrl-shim tegra-drm mc-utils\n' \
           >> /rootfs/usr/lib/modprobe.d/nvidia-tegra.conf
 
         # Also export vmlinuz.efi + signing key so the build script can build
