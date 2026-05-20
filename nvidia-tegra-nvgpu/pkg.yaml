@@ -23,12 +23,8 @@ steps:
         destination: hwpm.tar.gz
         sha256: "96c7656bdad0bf330e7fd58981b8a4eec4717a76840cefbe84e720d88b46be55"
         sha512: "971b91fcae284c59dbe411356109bce9b1a7884b8fac41c9683c79bf3eddef606e71ebaa9c06ad2389b2ba382c3c1125fabe0cbaeb5edac857e218077ed24ef9"
-      # nvhost-ctrl-shim: /dev/nvhost-ctrl with NVHOST ioctl API (bridges to OOT host1x)
-      # Pinned to commit 261ad19 — update url+sha when nvhost_ctrl_shim.c changes
-      - url: https://raw.githubusercontent.com/schwankner/talos-jetson-orin/261ad19/nvhost-ctrl-shim/nvhost_ctrl_shim.c
-        destination: nvhost_ctrl_shim.c
-        sha256: "c3e63583f49350bd8f43e9ec0c4459e7ca315c5aeb8acb850f3e38b2a7c53db3"
-        sha512: "681887e71f0d5a379b5000209ae3c8085cac3936bda8404bd2749b0f33ddb0b1d5139869a04a5bde370fce78a734ca572af6581e484512e924ae32d831a23c65"
+      # nvhost-ctrl-shim REMOVED in this build variant (feat/no-shim-test)
+      # to measure whether the shim provides any benefit on top of host1x-fence.ko.
     env:
       ARCH: arm64
       LLVM: "1"
@@ -42,10 +38,7 @@ steps:
         tar xzf hwpm.tar.gz -C /oot-src/hwpm --strip-components=1
         echo "Sources extracted:"
         ls /oot-src/
-        # nvhost-ctrl-shim C source (fetched by bldr, available as nvhost_ctrl_shim.c)
-        mkdir -p /oot-src/nvhost-ctrl-shim
-        cp nvhost_ctrl_shim.c /oot-src/nvhost-ctrl-shim/nvhost_ctrl_shim.c
-        echo "nvhost-ctrl-shim source ready ($(wc -l < /oot-src/nvhost-ctrl-shim/nvhost_ctrl_shim.c) lines)"
+        # nvhost-ctrl-shim removed in this build variant (feat/no-shim-test)
     build:
       - |
         echo "Building NVIDIA conftest (kernel compat detection)..."
@@ -256,13 +249,8 @@ steps:
           >> /oot-src/out/nvidia-linux-header/Module.symvers.nvidia 2>/dev/null || true
 
         # ── tegra-drm: OE4T DRM driver compatible with patched host1x ABI ──
-        # The vanilla Talos kernel ships tegra-drm.ko built against vanilla
-        # host1x ABI, which is INCOMPATIBLE with our OE4T host1x.ko (different
-        # symbol versions for host1x_job_alloc, host1x_syncpt_get_by_id, etc.).
-        # Build OE4T's tegra-drm so that /dev/dri/renderD128 is created and
-        # libcuda can enumerate the iGPU. Without this, cuInit returns 801
-        # (CUDA_ERROR_NOT_SUPPORTED) and Ollama falls back to CPU.
-        # Headless build: CONFIG_DRM_TEGRA_HAVE_DISPLAY=n (no DP/DSI/HDMI).
+        # Builds /dev/dri/renderD128 so libcuda can enumerate the iGPU.
+        # Headless: CONFIG_DRM_TEGRA_HAVE_DISPLAY=n (no DP/DSI/HDMI).
         echo "=== Building OOT tegra-drm (headless / render-node only) ==="
         sed -i 's|ccflags-y += -Werror||g' \
           ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Makefile 2>/dev/null || true
@@ -288,30 +276,9 @@ steps:
         cat ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Module.symvers \
           >> /oot-src/out/nvidia-linux-header/Module.symvers.nvidia 2>/dev/null || true
 
-        # ── nvhost-ctrl-shim: provides /dev/nvhost-ctrl with NVHOST ioctl API ──
-        # Bridges NVHOST_IOCTL_CTRL_SYNC_FENCE_CREATE / SYNC_FILE_EXTRACT to the
-        # OOT host1x syncpoint kernel API so libnvrm_host1x.so (JetPack 6 CUDA
-        # runtime) can use hardware syncpoint interrupts for cudaStreamSynchronize
-        # instead of CPU semaphore busy-polling. Symbol deps: host1x.ko only.
-        echo "=== Building nvhost-ctrl-shim ==="
-        SHIM_DIR=/oot-src/nvhost-ctrl-shim
-        mkdir -p "${SHIM_DIR}"
-        # Makefile — use printf (heredocs incompatible with YAML literal blocks)
-        printf 'obj-m += nvhost_ctrl_shim.o\nccflags-y += -I$(src)/../nvidia-oot/drivers/gpu/host1x/include\n' \
-          > "${SHIM_DIR}/Makefile"
-        # C source — pre-fetched by bldr (sources: entry), available at /oot-src/nvhost-ctrl-shim/
-        echo "nvhost-ctrl-shim: source ready ($(wc -l < "${SHIM_DIR}/nvhost_ctrl_shim.c") lines)"
-        make -j$(nproc) ARCH=arm64 \
-          -C /src \
-          M="${SHIM_DIR}" \
-          CC=/usr/local/bin/clang-oot \
-          LLVM=1 \
-          KBUILD_EXTRA_SYMBOLS=/oot-src/out/nvidia-linux-header/Module.symvers.nvidia \
-          modules 2>&1 | tee /tmp/build-nvhost-ctrl-shim.log
-        [[ ${PIPESTATUS[0]} -eq 0 ]] && echo "nvhost-ctrl-shim: OK" \
-          || { echo "=== nvhost-ctrl-shim BUILD FAILED ==="; cat /tmp/build-nvhost-ctrl-shim.log; exit 1; }
-        cat "${SHIM_DIR}/Module.symvers" \
-          >> /oot-src/out/nvidia-linux-header/Module.symvers.nvidia 2>/dev/null || true
+        # nvhost-ctrl-shim build REMOVED in this build variant (feat/oe4t-drm-test)
+        # to test whether OE4T tegra-drm + host1x-nvhost alone enable GPU on
+        # Talos+OE4T. If they do, the shim was always irrelevant for libcuda.
 
         # ── nvmap: provides tegra_vpr_dev, nvmap_dma_alloc_attrs, nvmap_dma_free_attrs ──
         echo "=== Building nvmap ==="
@@ -447,9 +414,7 @@ steps:
         # host1x-fence goes to extra/ (no in-tree equivalent)
         find /oot-src/nvidia-oot/drivers/gpu/host1x-fence -name "*.ko" \
           -exec install -m 644 {} /rootfs/usr/lib/modules/${KERNEL_RELEASE}/extra/nvidia-tegra/ \;
-        # nvhost-ctrl-shim: provides real /dev/nvhost-ctrl for CUDA stream sync
-        find /oot-src/nvhost-ctrl-shim -name "*.ko" \
-          -exec install -m 644 {} /rootfs/usr/lib/modules/${KERNEL_RELEASE}/extra/nvidia-tegra/ \;
+        # nvhost-ctrl-shim install REMOVED in this build variant (feat/no-shim-test)
 
         # All nvidia-oot modules go to extra/ as usual
         find /oot-src/nvidia-oot -name "*.ko" \
@@ -483,21 +448,13 @@ steps:
         # host1x provides syncpoint alloc; host1x-fence provides fence extract;
         # nvmap provides GPU memory; mc-utils provides emc_freq_to_bw; nvgpu last.
         mkdir -p /rootfs/usr/lib/modprobe.d
-        # Load order:
-        #   host1x → host1x-fence → host1x-nvhost → nvhost-ctrl-shim → tegra-drm → nvmap → nvgpu
-        #
-        # tegra-drm depends on host1x ABI (OE4T-patched, not vanilla). It must
-        # load before nvgpu so /dev/dri/renderD128 exists when libcuda enumerates
-        # the iGPU; without it cuInit returns 801 (CUDA_ERROR_NOT_SUPPORTED).
-        # host1x-nvhost provides /dev/nvhost-ctrl-* device nodes (gpu, isp, vi,
-        # pva, nvdla, nvcsi variants) — JetPack6 libnvrm_host1x.so opens some.
-        # nvhost-ctrl-shim provides the plain /dev/nvhost-ctrl (legacy) for
-        # CUDA runtimes that still expect it; same role as on Orin NX.
-        printf 'softdep nvhost-ctrl-shim pre: host1x host1x-fence\n' \
-          > /rootfs/usr/lib/modprobe.d/nvidia-tegra.conf
+        # Load order: host1x → host1x-fence → host1x-nvhost → tegra-drm → nvmap → nvgpu
+        # tegra-drm registers /dev/dri/renderD128 so libcuda can enumerate the iGPU.
+        # nvhost-ctrl-shim REMOVED in this build variant (feat/oe4t-drm-test) to
+        # cleanly test whether DRM alone makes GPU work on Talos+OE4T.
         printf 'softdep tegra-drm pre: host1x host1x-fence host1x-nvhost\n' \
-          >> /rootfs/usr/lib/modprobe.d/nvidia-tegra.conf
-        printf 'softdep nvgpu pre: host1x nvmap host1x-fence host1x-nvhost nvhost-ctrl-shim tegra-drm mc-utils\n' \
+          > /rootfs/usr/lib/modprobe.d/nvidia-tegra.conf
+        printf 'softdep nvgpu pre: host1x nvmap host1x-fence host1x-nvhost tegra-drm mc-utils\n' \
           >> /rootfs/usr/lib/modprobe.d/nvidia-tegra.conf
 
         # Also export vmlinuz.efi + signing key so the build script can build
