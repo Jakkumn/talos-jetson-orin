@@ -235,6 +235,13 @@ steps:
           >> ${NVIDIA_OOT}/drivers/gpu/host1x-nvhost/Makefile
         printf 'ccflags-y += -I$(srctree.nvidia-oot)/drivers/gpu/host1x/include\n' \
           >> ${NVIDIA_OOT}/drivers/gpu/host1x-nvhost/Makefile
+        printf 'ccflags-y += -include $(srctree)/include/generated/uapi/linux/version.h\n' \
+          >> ${NVIDIA_OOT}/drivers/gpu/host1x-nvhost/Makefile
+        # Kernel 6.4: class_create(THIS_MODULE, name) -> class_create(name).
+        # Conftest probe for NV_CLASS_CREATE_HAS_NO_OWNER_ARG is unreliable
+        # under Clang/-Werror; replace with LINUX_VERSION_CODE guard.
+        grep -rl "NV_CLASS_CREATE_HAS_NO_OWNER_ARG" ${NVIDIA_OOT}/drivers/gpu/host1x-nvhost/ \
+          | xargs -r sed -i "s|#if defined(NV_CLASS_CREATE_HAS_NO_OWNER_ARG)|#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,4,0)|g"
         make -j $(nproc) ARCH=arm64 \
           -C /src \
           M=${NVIDIA_OOT}/drivers/gpu/host1x-nvhost \
@@ -260,6 +267,57 @@ steps:
           >> ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Makefile
         printf 'ccflags-y += -I$(srctree.nvidia-oot)/drivers/gpu/host1x/include\n' \
           >> ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Makefile
+        printf 'ccflags-y += -include $(srctree)/include/generated/uapi/linux/version.h\n' \
+          >> ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Makefile
+        # Replace conftest probe macros with LINUX_VERSION_CODE guards.
+        # Conftest probes are unreliable with Clang/-Werror; explicit version
+        # checks are deterministic. Target kernel: 6.18.24-talos.
+        TEGRA_DRM=${NVIDIA_OOT}/drivers/gpu/drm/tegra
+        # Generic substitution helper for kernel-version-gated PRESENT/ARG macros
+        # Format: macro|kernel_version
+        for entry in \
+          "NV_IOMMU_MAP_HAS_GFP_ARG|6,3,0" \
+          "NV_IOMMU_PAGING_DOMAIN_ALLOC_PRESENT|6,11,0" \
+          "NV_VM_AREA_STRUCT_HAS_CONST_VM_FLAGS|6,3,0" \
+          "NV_APERTURE_REMOVE_ALL_CONFLICTING_DEVICES_PRESENT|6,0,0" \
+          "NV_FOP_UNSIGNED_OFFSET_PRESENT|6,12,0" \
+          "NV_DRM_DRM_CLIENT_SETUP_H_PRESENT|6,13,0" \
+          "NV_DRM_CLIENTS_DRM_CLIENT_SETUP_H_PRESENT|6,14,0" \
+          "NV_DRM_HELPER_MODE_FILL_FB_STRUCT_HAS_INFO_ARG|6,17,0" \
+          "NV_DRM_MODE_CONFIG_FUNCS_STRUCT_FB_CREATE_HAS_INFO_ARG|6,17,0" \
+          "NV_DRM_APERTURE_REMOVE_FRAMEBUFFERS_HAS_NO_PRIMARY_ARG|6,5,0" \
+          "NV_DRM_DEBUGFS_REMOVE_FILES_HAS_ROOT_ARG|6,7,0" \
+          "NV_DRM_CONNECTOR_HELPER_FUNCS_STRUCT_MODE_VALID_HAS_CONST_ARG|6,15,0" \
+          "NV_DRM_DISPLAY_INFO_STRUCT_HAS_SOURCE_PHYSICAL_ADDRESS|6,7,0" \
+          "NV_DEVM_PM_DOMAIN_ATTACH_LIST_PRESENT|6,13,0" \
+          "NV_DRM_DP_LINK_POWER_UP_PRESENT|6,16,0" \
+          "NV_CLK_HW_DETERMINE_RATE_NO_REPARENT_PRESENT|6,4,0" \
+          "NV_BUS_TYPE_STRUCT_MATCH_HAS_CONST_DRV_ARG|6,8,0" \
+          "NV_BUS_TYPE_STRUCT_UEVENT_HAS_CONST_DEV_ARG|6,11,0" \
+          "NV_PLATFORM_DRIVER_STRUCT_REMOVE_RETURNS_VOID|6,11,0"; do
+          macro="${entry%|*}"; ver="${entry#*|}"
+          grep -rl "${macro}" ${TEGRA_DRM} 2>/dev/null \
+            | xargs -r sed -i "s|#if defined(${macro})|#if LINUX_VERSION_CODE >= KERNEL_VERSION(${ver})|g"
+        done
+        # Macros for APIs REMOVED in newer kernels (inverse logic):
+        for entry in \
+          "NV_DRM_DRIVER_HAS_FBDEV_PROBE|6,13,0" \
+          "NV_DRM_DRIVER_STRUCT_HAS_DATE|6,14,0" \
+          "NV_DRM_DRIVER_STRUCT_HAS_IRQ_ENABLED_ARG|6,4,0" \
+          "NV_DRM_APERTURE_REMOVE_FRAMEBUFFERS_HAS_DRM_DRIVER_ARG|6,0,0"; do
+          macro="${entry%|*}"; ver="${entry#*|}"
+          grep -rl "${macro}" ${TEGRA_DRM} 2>/dev/null \
+            | xargs -r sed -i "s|#if defined(${macro})|#if LINUX_VERSION_CODE < KERNEL_VERSION(${ver})|g"
+        done
+        # Always-present in 6.18 (OE4T-tested macros): set to 1
+        for macro in \
+          NV_LINUX_IOSYS_MAP_H_PRESENT \
+          NV_TEGRA_DEV_IOMMU_GET_STREAM_ID_PRESENT \
+          NV_DEVM_TEGRA_CORE_DEV_INIT_OPP_TABLE_COMMON_PRESENT; do
+          grep -rl "${macro}" ${TEGRA_DRM} 2>/dev/null \
+            | xargs -r sed -i "s|#if defined(${macro})|#if 1 /* OE4T: always present */|g"
+        done
+        echo "Patched tegra-drm: LINUX_VERSION_CODE guards for kernel 6.18"
         make -j $(nproc) ARCH=arm64 \
           -C /src \
           M=${NVIDIA_OOT}/drivers/gpu/drm/tegra \
