@@ -161,10 +161,17 @@ jobs:
           echo "name=$(basename "${RAW}")" >> "$GITHUB_OUTPUT"
           ls -lh dist/
 
+      # Sanitize ref_name: actions/upload-artifact rejects '/' (and other FS-
+      # unsafe chars), but branch names like 'feat/no-shim-test' contain '/'.
+      # Replace '/' with '-' so workflow_dispatch on a topic branch succeeds.
+      - name: Sanitize branch name for artifact
+        id: ref
+        run: echo "safe=$(echo '${{ github.ref_name }}' | tr '/' '-')" >> "$GITHUB_OUTPUT"
+
       - name: Upload USB image as workflow artifact
         uses: actions/upload-artifact@v7
         with:
-          name: talos-jetson-usb-${{ github.ref_name }}
+          name: talos-jetson-usb-${{ steps.ref.outputs.safe }}
           path: ${{ steps.img.outputs.path }}
           retention-days: 30
 
