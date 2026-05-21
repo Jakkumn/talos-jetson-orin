@@ -296,8 +296,16 @@ steps:
           "NV_BUS_TYPE_STRUCT_UEVENT_HAS_CONST_DEV_ARG|6,11,0" \
           "NV_PLATFORM_DRIVER_STRUCT_REMOVE_RETURNS_VOID|6,11,0"; do
           macro="${entry%|*}"; ver="${entry#*|}"
-          { grep -rl "${macro}" ${TEGRA_DRM} 2>/dev/null || true; } \
-            | xargs -r sed -i "s|#if defined(${macro})|#if LINUX_VERSION_CODE >= KERNEL_VERSION(${ver})|g"
+          # Cover all four #if forms: defined, !defined, elif defined, elif !defined.
+          # When the macro maps to "kernel >= ver", defined() is TRUE iff kernel >= ver.
+          { grep -rl "${macro}" ${TEGRA_DRM} 2>/dev/null || true; } | while read -r f; do
+            sed -i \
+              -e "s|#if defined(${macro})|#if LINUX_VERSION_CODE >= KERNEL_VERSION(${ver})|g" \
+              -e "s|#if !defined(${macro})|#if LINUX_VERSION_CODE < KERNEL_VERSION(${ver})|g" \
+              -e "s|#elif defined(${macro})|#elif LINUX_VERSION_CODE >= KERNEL_VERSION(${ver})|g" \
+              -e "s|#elif !defined(${macro})|#elif LINUX_VERSION_CODE < KERNEL_VERSION(${ver})|g" \
+              "${f}"
+          done
         done
         # Macros for APIs REMOVED in newer kernels (inverse logic):
         for entry in \
@@ -306,16 +314,29 @@ steps:
           "NV_DRM_DRIVER_STRUCT_HAS_IRQ_ENABLED_ARG|6,4,0" \
           "NV_DRM_APERTURE_REMOVE_FRAMEBUFFERS_HAS_DRM_DRIVER_ARG|6,0,0"; do
           macro="${entry%|*}"; ver="${entry#*|}"
-          { grep -rl "${macro}" ${TEGRA_DRM} 2>/dev/null || true; } \
-            | xargs -r sed -i "s|#if defined(${macro})|#if LINUX_VERSION_CODE < KERNEL_VERSION(${ver})|g"
+          # For removed-in-newer-kernel macros: defined() means "still present", i.e. kernel < ver.
+          { grep -rl "${macro}" ${TEGRA_DRM} 2>/dev/null || true; } | while read -r f; do
+            sed -i \
+              -e "s|#if defined(${macro})|#if LINUX_VERSION_CODE < KERNEL_VERSION(${ver})|g" \
+              -e "s|#if !defined(${macro})|#if LINUX_VERSION_CODE >= KERNEL_VERSION(${ver})|g" \
+              -e "s|#elif defined(${macro})|#elif LINUX_VERSION_CODE < KERNEL_VERSION(${ver})|g" \
+              -e "s|#elif !defined(${macro})|#elif LINUX_VERSION_CODE >= KERNEL_VERSION(${ver})|g" \
+              "${f}"
+          done
         done
         # Always-present in 6.18 (OE4T-tested macros): set to 1
         for macro in \
           NV_LINUX_IOSYS_MAP_H_PRESENT \
           NV_TEGRA_DEV_IOMMU_GET_STREAM_ID_PRESENT \
           NV_DEVM_TEGRA_CORE_DEV_INIT_OPP_TABLE_COMMON_PRESENT; do
-          { grep -rl "${macro}" ${TEGRA_DRM} 2>/dev/null || true; } \
-            | xargs -r sed -i "s|#if defined(${macro})|#if 1 /* OE4T: always present */|g"
+          { grep -rl "${macro}" ${TEGRA_DRM} 2>/dev/null || true; } | while read -r f; do
+            sed -i \
+              -e "s|#if defined(${macro})|#if 1 /* OE4T: always present */|g" \
+              -e "s|#if !defined(${macro})|#if 0 /* OE4T: always present */|g" \
+              -e "s|#elif defined(${macro})|#elif 1 /* OE4T: always present */|g" \
+              -e "s|#elif !defined(${macro})|#elif 0 /* OE4T: always present */|g" \
+              "${f}"
+          done
         done
         echo "Patched tegra-drm: LINUX_VERSION_CODE guards for kernel 6.18"
         make -j $(nproc) ARCH=arm64 \
