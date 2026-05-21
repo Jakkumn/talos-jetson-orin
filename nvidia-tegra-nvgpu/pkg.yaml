@@ -283,6 +283,13 @@ steps:
         { grep -rl "NV_DEVM_TEGRA_CORE_DEV_INIT_OPP_TABLE_COMMON_PRESENT" ${HWPM_DIR} 2>/dev/null || true; } | while read -r f; do
           sed -i "s|#if defined(NV_DEVM_TEGRA_CORE_DEV_INIT_OPP_TABLE_COMMON_PRESENT)|#if 1 /* OE4T: always present */|g" "${f}"
         done
+        # Kernel 6.5+: get_user_pages() dropped the trailing 'vmas' (struct vm_area_struct **)
+        # parameter. The hwpm source still passes NULL as a 5th arg. Strip it.
+        # See linux commit 54d020692b34 ("mm/gup: remove unused vmas parameter from get_user_pages()").
+        # Use sed -z (slurp mode) since the call spans multiple lines, then
+        # match the specific pattern ", NULL)" right after hwpm->alist_map->pages.
+        sed -i -z 's|hwpm->alist_map->pages, NULL)|hwpm->alist_map->pages)|g' \
+          ${HWPM_DIR}/os/linux/mem_mgmt_utils.c 2>/dev/null || true
         make -j $(nproc) ARCH=arm64 \
           -C /src \
           M=${HWPM_DIR} \
