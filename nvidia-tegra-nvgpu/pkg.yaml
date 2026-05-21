@@ -318,15 +318,15 @@ steps:
           >> ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Makefile
         printf 'ccflags-y += -include $(srctree)/include/generated/uapi/linux/version.h\n' \
           >> ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Makefile
-        # Force-undef CONFIG_DRM_FBDEV_EMULATION for tegra-drm sources. The
-        # host kernel has it =y in auto.conf, which would make drm.h prototype
-        # an external tegra_fbdev_setup() and require fbdev.c to compile.
-        # But fbdev.c uses drm_fb_helper internals that changed substantially
-        # between 6.0 and 6.18 (drm_fb_helper.fbdev removed, fb_probe renamed,
-        # function arities changed). We don't need fbdev emulation for CUDA;
-        # undef'ing the macro makes drm.h use the inline stub.
-        printf 'ccflags-y += -UCONFIG_DRM_FBDEV_EMULATION\n' \
-          >> ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Makefile
+        # Force-stub tegra_fbdev_setup in drm.h. The host kernel sets
+        # CONFIG_DRM_FBDEV_EMULATION=y in auto.conf, which is included via
+        # -include linux/autoconf.h — '-U' on ccflags doesn't override it.
+        # Replace '#ifdef CONFIG_DRM_FBDEV_EMULATION' in drm.h with '#if 0'
+        # so the inline stub branch is always picked. We skip fbdev.c in
+        # the Makefile because its drm_fb_helper internals broke heavily
+        # between 6.0 and 6.18.
+        sed -i 's|#ifdef CONFIG_DRM_FBDEV_EMULATION|#if 0 /* fbdev not needed for headless CUDA */|g' \
+          ${NVIDIA_OOT}/drivers/gpu/drm/tegra/drm.h
         # Replace conftest probe macros with LINUX_VERSION_CODE guards.
         # Conftest probes are unreliable with Clang/-Werror; explicit version
         # checks are deterministic. Target kernel: 6.18.24-talos.
