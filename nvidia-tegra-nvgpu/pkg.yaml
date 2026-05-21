@@ -264,11 +264,21 @@ steps:
         printf 'ccflags-y += -include $(srctree)/include/generated/uapi/linux/version.h\n' \
           >> ${HWPM_DIR}/Makefile
         # Patch conftest macros same as host1x/tegra-drm
-        { grep -rl "NV_PLATFORM_DRIVER_STRUCT_REMOVE_RETURNS_VOID" ${HWPM_DIR} 2>/dev/null || true; } | while read -r f; do
-          sed -i \
-            -e "s|#if defined(NV_PLATFORM_DRIVER_STRUCT_REMOVE_RETURNS_VOID)|#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,11,0)|g" \
-            -e "s|#if !defined(NV_PLATFORM_DRIVER_STRUCT_REMOVE_RETURNS_VOID)|#if LINUX_VERSION_CODE < KERNEL_VERSION(6,11,0)|g" \
-            "${f}"
+        # Conftest macros (same kernel-version mapping as host1x/tegra-drm)
+        for entry in \
+          "NV_PLATFORM_DRIVER_STRUCT_REMOVE_RETURNS_VOID|6,11,0" \
+          "NV_CLASS_STRUCT_DEVNODE_HAS_CONST_DEV_ARG|6,2,0" \
+          "NV_CLASS_CREATE_HAS_NO_OWNER_ARG|6,4,0" \
+          "NV_IOMMU_MAP_HAS_GFP_ARG|6,3,0"; do
+          macro="${entry%|*}"; ver="${entry#*|}"
+          { grep -rl "${macro}" ${HWPM_DIR} 2>/dev/null || true; } | while read -r f; do
+            sed -i \
+              -e "s|#if defined(${macro})|#if LINUX_VERSION_CODE >= KERNEL_VERSION(${ver})|g" \
+              -e "s|#if !defined(${macro})|#if LINUX_VERSION_CODE < KERNEL_VERSION(${ver})|g" \
+              -e "s|#elif defined(${macro})|#elif LINUX_VERSION_CODE >= KERNEL_VERSION(${ver})|g" \
+              -e "s|#elif !defined(${macro})|#elif LINUX_VERSION_CODE < KERNEL_VERSION(${ver})|g" \
+              "${f}"
+          done
         done
         { grep -rl "NV_DEVM_TEGRA_CORE_DEV_INIT_OPP_TABLE_COMMON_PRESENT" ${HWPM_DIR} 2>/dev/null || true; } | while read -r f; do
           sed -i "s|#if defined(NV_DEVM_TEGRA_CORE_DEV_INIT_OPP_TABLE_COMMON_PRESENT)|#if 1 /* OE4T: always present */|g" "${f}"
