@@ -255,6 +255,38 @@ steps:
         cat ${NVIDIA_OOT}/drivers/gpu/host1x-nvhost/Module.symvers \
           >> /oot-src/out/nvidia-linux-header/Module.symvers.nvidia 2>/dev/null || true
 
+        # ── linux-hwpm: provides tegra_soc_hwpm_ip_register/unregister ──
+        # tegra-drm/hwpm.c (and virt.c) call into nvhwpm.ko. Build it from
+        # the OE4T linux-hwpm repo we already extracted to /oot-src/hwpm.
+        echo "=== Building OOT linux-hwpm (nvhwpm.ko) ==="
+        HWPM_DIR=/oot-src/hwpm/drivers/tegra/hwpm
+        sed -i 's|ccflags-y += -Werror||g' ${HWPM_DIR}/Makefile 2>/dev/null || true
+        printf 'ccflags-y += -include $(srctree)/include/generated/uapi/linux/version.h\n' \
+          >> ${HWPM_DIR}/Makefile
+        # Patch conftest macros same as host1x/tegra-drm
+        { grep -rl "NV_PLATFORM_DRIVER_STRUCT_REMOVE_RETURNS_VOID" ${HWPM_DIR} 2>/dev/null || true; } | while read -r f; do
+          sed -i \
+            -e "s|#if defined(NV_PLATFORM_DRIVER_STRUCT_REMOVE_RETURNS_VOID)|#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,11,0)|g" \
+            -e "s|#if !defined(NV_PLATFORM_DRIVER_STRUCT_REMOVE_RETURNS_VOID)|#if LINUX_VERSION_CODE < KERNEL_VERSION(6,11,0)|g" \
+            "${f}"
+        done
+        { grep -rl "NV_DEVM_TEGRA_CORE_DEV_INIT_OPP_TABLE_COMMON_PRESENT" ${HWPM_DIR} 2>/dev/null || true; } | while read -r f; do
+          sed -i "s|#if defined(NV_DEVM_TEGRA_CORE_DEV_INIT_OPP_TABLE_COMMON_PRESENT)|#if 1 /* OE4T: always present */|g" "${f}"
+        done
+        make -j $(nproc) ARCH=arm64 \
+          -C /src \
+          M=${HWPM_DIR} \
+          CC=/usr/local/bin/clang-oot \
+          CONFIG_TEGRA_OOT_MODULE=m \
+          srctree.nvidia-oot=${NVIDIA_OOT} \
+          srctree.nvconftest=${NVIDIA_CONFTEST} \
+          srctree.hwpm=/oot-src/hwpm \
+          LLVM=1 \
+          KBUILD_EXTRA_SYMBOLS=/oot-src/out/nvidia-linux-header/Module.symvers.nvidia \
+          modules 2>&1 | tee /tmp/build-hwpm.log; [[ ${PIPESTATUS[0]} -eq 0 ]] && echo "linux-hwpm: OK" || { echo "linux-hwpm: BUILD FAILED (see errors above)"; exit 1; }
+        cat ${HWPM_DIR}/Module.symvers \
+          >> /oot-src/out/nvidia-linux-header/Module.symvers.nvidia 2>/dev/null || true
+
         # ── tegra-drm: OE4T DRM driver compatible with patched host1x ABI ──
         # Builds /dev/dri/renderD128 so libcuda can enumerate the iGPU.
         # Headless: CONFIG_DRM_TEGRA_HAVE_DISPLAY=n (no DP/DSI/HDMI).
@@ -339,13 +371,17 @@ steps:
           done
         done
         echo "Patched tegra-drm: LINUX_VERSION_CODE guards for kernel 6.18"
+        # Note: DON'T set CONFIG_DRM_FBDEV_EMULATION=n here. The host Talos
+        # kernel was built with FBDEV_EMULATION=y, so drm.h prototypes the
+        # external `void tegra_fbdev_setup()` instead of the static-inline
+        # stub. We need fbdev.o in the build so the symbol is defined.
         make -j $(nproc) ARCH=arm64 \
           -C /src \
           M=${NVIDIA_OOT}/drivers/gpu/drm/tegra \
           CC=/usr/local/bin/clang-oot \
           CONFIG_TEGRA_OOT_MODULE=m \
           CONFIG_DRM_TEGRA_HAVE_DISPLAY=n \
-          CONFIG_DRM_FBDEV_EMULATION=n \
+          CONFIG_DRM_FBDEV_EMULATION=y \
           srctree.nvidia-oot=${NVIDIA_OOT} \
           srctree.nvconftest=${NVIDIA_CONFTEST} \
           srctree.hwpm=/oot-src/hwpm \
