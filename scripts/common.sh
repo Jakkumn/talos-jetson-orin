@@ -41,7 +41,7 @@ fi
 LLVM_IMAGE="${LLVM_IMAGE:-ghcr.io/siderolabs/llvm}"  # informational only
 
 # ── Extension versions ───────────────────────────────────────────────────────
-NVGPU_VERSION="${NVGPU_VERSION:-5.11.0-drm-noshim}" # 5.10.11 (LINUX_VERSION_CODE guards) / 5.11.0-drm-noshim (feat: add OE4T tegra-drm.ko + host1x-nvhost.ko; DROP nvhost_ctrl_shim. Pure test: does DRM alone enable cuInit on OE4T?)
+NVGPU_VERSION="${NVGPU_VERSION:-5.11.1-drm-noshim}" # 5.11.0-drm-noshim (feat: tegra-drm + host1x-nvhost build; drop shim) / 5.11.1-drm-noshim (fix: install nvhwpm.ko explicitly + overwrite vanilla tegra-drm.ko at kernel/ path so modprobe loads OE4T version)
 FIRMWARE_EXT_TAG="${FIRMWARE_EXT_TAG:-v5}"        # v1 / v2 / v3 / v4 / v5 (pmu_pkc_prod_sig.bin added)
 KERNEL_MODULES_VERSION="${KERNEL_MODULES_VERSION:-1.3.0}"
 
