@@ -318,6 +318,15 @@ steps:
           >> ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Makefile
         printf 'ccflags-y += -include $(srctree)/include/generated/uapi/linux/version.h\n' \
           >> ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Makefile
+        # Force-undef CONFIG_DRM_FBDEV_EMULATION for tegra-drm sources. The
+        # host kernel has it =y in auto.conf, which would make drm.h prototype
+        # an external tegra_fbdev_setup() and require fbdev.c to compile.
+        # But fbdev.c uses drm_fb_helper internals that changed substantially
+        # between 6.0 and 6.18 (drm_fb_helper.fbdev removed, fb_probe renamed,
+        # function arities changed). We don't need fbdev emulation for CUDA;
+        # undef'ing the macro makes drm.h use the inline stub.
+        printf 'ccflags-y += -UCONFIG_DRM_FBDEV_EMULATION\n' \
+          >> ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Makefile
         # Replace conftest probe macros with LINUX_VERSION_CODE guards.
         # Conftest probes are unreliable with Clang/-Werror; explicit version
         # checks are deterministic. Target kernel: 6.18.24-talos.
@@ -388,17 +397,17 @@ steps:
           done
         done
         echo "Patched tegra-drm: LINUX_VERSION_CODE guards for kernel 6.18"
-        # Note: DON'T set CONFIG_DRM_FBDEV_EMULATION=n here. The host Talos
-        # kernel was built with FBDEV_EMULATION=y, so drm.h prototypes the
-        # external `void tegra_fbdev_setup()` instead of the static-inline
-        # stub. We need fbdev.o in the build so the symbol is defined.
+        # CONFIG_DRM_FBDEV_EMULATION=n on the Makefile side (no fbdev.o built)
+        # plus -UCONFIG_DRM_FBDEV_EMULATION in ccflags (above) so the C code
+        # sees the stub. We do NOT want fbdev.c — it requires drm_fb_helper
+        # APIs that broke heavily between kernel 6.0 and 6.18.
         make -j $(nproc) ARCH=arm64 \
           -C /src \
           M=${NVIDIA_OOT}/drivers/gpu/drm/tegra \
           CC=/usr/local/bin/clang-oot \
           CONFIG_TEGRA_OOT_MODULE=m \
           CONFIG_DRM_TEGRA_HAVE_DISPLAY=n \
-          CONFIG_DRM_FBDEV_EMULATION=y \
+          CONFIG_DRM_FBDEV_EMULATION=n \
           srctree.nvidia-oot=${NVIDIA_OOT} \
           srctree.nvconftest=${NVIDIA_CONFTEST} \
           srctree.hwpm=/oot-src/hwpm \
