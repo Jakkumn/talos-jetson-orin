@@ -557,6 +557,21 @@ steps:
           -exec install -m 644 {} /rootfs/usr/lib/modules/${KERNEL_RELEASE}/extra/nvidia-tegra/ \;
         # nvhost-ctrl-shim install REMOVED in this build variant (feat/no-shim-test)
 
+        # OE4T tegra-drm: also install at the kernel/drivers/gpu/drm/tegra path
+        # so modprobe finds OUR tegra-drm.ko (built against OE4T host1x ABI) instead
+        # of the vanilla Talos kernel's tegra-drm.ko (built against vanilla host1x).
+        # Otherwise depmod creates 'kernel/drivers/gpu/drm/tegra/tegra-drm.ko: kernel/drivers/gpu/host1x/host1x.ko'
+        # which points modprobe at the WRONG tegra-drm.ko, failing with
+        # 'tegra_drm: disagrees about version of symbol host1x_job_alloc'.
+        mkdir -p /rootfs/usr/lib/modules/${KERNEL_RELEASE}/kernel/drivers/gpu/drm/tegra
+        find /oot-src/nvidia-oot/drivers/gpu/drm/tegra -name "tegra-drm.ko" \
+          -exec install -m 644 {} /rootfs/usr/lib/modules/${KERNEL_RELEASE}/kernel/drivers/gpu/drm/tegra/ \;
+
+        # nvhwpm.ko lives in /oot-src/hwpm/, NOT /oot-src/nvidia-oot/. The generic
+        # find below misses it — install explicitly.
+        find /oot-src/hwpm -name "nvhwpm.ko" \
+          -exec install -m 644 {} /rootfs/usr/lib/modules/${KERNEL_RELEASE}/extra/nvidia-tegra/ \;
+
         # All nvidia-oot modules go to extra/ as usual
         find /oot-src/nvidia-oot -name "*.ko" \
           -exec install -m 644 {} /rootfs/usr/lib/modules/${KERNEL_RELEASE}/extra/nvidia-tegra/ \;
