@@ -17,14 +17,15 @@ machine:
         modules:
             - name: host1x
             - name: host1x_fence
-            - name: nvhost_ctrl_shim
+            - name: host1x_nvhost
+            - name: tegra_drm
             - name: nvmap
             - name: mc_utils
             - name: nvgpu
             - name: governor_pod_scaling
     install:
         disk: /dev/nvme0n1
-        image: ghcr.io/schwankner/custom-installer:v1.13.0-6.18.24-nvgpu5.10.7
+        image: ghcr.io/schwankner/custom-installer:v1.13.0-6.18.24-nvgpu5.11.1-drm-noshim
         wipe: false
     features:
         diskQuotaSupport: true

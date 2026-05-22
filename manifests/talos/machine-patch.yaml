@@ -1,0 +1,37 @@
+# Talos machine config patch — Jetson Orin (all SKUs)
+#
+# Sets installer image + kernel module load order for the OE4T GPU stack.
+# Apply together with machine-patch-cdi.yaml for full GPU container support.
+#
+# How to apply (fresh install, maintenance mode):
+#   talosctl apply-config --insecure --nodes <jetson-ip> \
+#     --file controlplane.yaml \
+#     --config-patch @manifests/talos/machine-patch.yaml \
+#     --config-patch @manifests/talos/machine-patch-cdi.yaml
+#
+# How to apply (running node, no-reboot):
+#   talosctl apply-config --nodes <jetson-ip> --talosconfig ./talosconfig \
+#     --file controlplane.yaml \
+#     --config-patch @manifests/talos/machine-patch.yaml \
+#     --config-patch @manifests/talos/machine-patch-cdi.yaml \
+#     --mode=no-reboot
+machine:
+  install:
+    disk: /dev/nvme0n1
+    image: ghcr.io/schwankner/custom-installer:v1.13.0-6.18.24-nvgpu5.11.1-drm-noshim
+    wipe: false
+  kernel:
+    modules:
+      # OE4T host1x stack (prerequisite for all GPU modules)
+      - name: host1x
+      - name: host1x_fence
+      - name: host1x_nvhost
+      # OE4T DRM stack — creates /dev/dri/renderD128 (required for CUDA via libcuda.so)
+      - name: tegra_drm
+      # GPU memory + bandwidth
+      - name: nvmap
+      - name: mc_utils
+      # Main CUDA driver (GA10B / Ampere)
+      - name: nvgpu
+      # GPU frequency scaling governor
+      - name: governor_pod_scaling

@@ -23,8 +23,6 @@ steps:
         destination: hwpm.tar.gz
         sha256: "96c7656bdad0bf330e7fd58981b8a4eec4717a76840cefbe84e720d88b46be55"
         sha512: "971b91fcae284c59dbe411356109bce9b1a7884b8fac41c9683c79bf3eddef606e71ebaa9c06ad2389b2ba382c3c1125fabe0cbaeb5edac857e218077ed24ef9"
-      # nvhost-ctrl-shim REMOVED in this build variant (feat/no-shim-test)
-      # to measure whether the shim provides any benefit on top of host1x-fence.ko.
     env:
       ARCH: arm64
       LLVM: "1"
@@ -38,7 +36,6 @@ steps:
         tar xzf hwpm.tar.gz -C /oot-src/hwpm --strip-components=1
         echo "Sources extracted:"
         ls /oot-src/
-        # nvhost-ctrl-shim removed in this build variant (feat/no-shim-test)
     build:
       - |
         echo "Building NVIDIA conftest (kernel compat detection)..."
@@ -417,9 +414,8 @@ steps:
         cat ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Module.symvers \
           >> /oot-src/out/nvidia-linux-header/Module.symvers.nvidia 2>/dev/null || true
 
-        # nvhost-ctrl-shim build REMOVED in this build variant (feat/oe4t-drm-test)
+        # nvhost-ctrl-shim not built — CUDA works via DRM render node (/dev/dri/renderD128)
         # to test whether OE4T tegra-drm + host1x-nvhost alone enable GPU on
-        # Talos+OE4T. If they do, the shim was always irrelevant for libcuda.
 
         # ── nvmap: provides tegra_vpr_dev, nvmap_dma_alloc_attrs, nvmap_dma_free_attrs ──
         echo "=== Building nvmap ==="
@@ -555,7 +551,6 @@ steps:
         # host1x-fence goes to extra/ (no in-tree equivalent)
         find /oot-src/nvidia-oot/drivers/gpu/host1x-fence -name "*.ko" \
           -exec install -m 644 {} /rootfs/usr/lib/modules/${KERNEL_RELEASE}/extra/nvidia-tegra/ \;
-        # nvhost-ctrl-shim install REMOVED in this build variant (feat/no-shim-test)
 
         # OE4T tegra-drm: also install at the kernel/drivers/gpu/drm/tegra path
         # so modprobe finds OUR tegra-drm.ko (built against OE4T host1x ABI) instead
@@ -606,7 +601,7 @@ steps:
         mkdir -p /rootfs/usr/lib/modprobe.d
         # Load order: host1x → host1x-fence → host1x-nvhost → tegra-drm → nvmap → nvgpu
         # tegra-drm registers /dev/dri/renderD128 so libcuda can enumerate the iGPU.
-        # nvhost-ctrl-shim REMOVED in this build variant (feat/oe4t-drm-test) to
+        # nvhost-ctrl-shim not installed — CUDA uses /dev/dri/renderD128 via tegra-drm.ko.
         # cleanly test whether DRM alone makes GPU work on Talos+OE4T.
         printf 'softdep tegra-drm pre: host1x host1x-fence host1x-nvhost\n' \
           > /rootfs/usr/lib/modprobe.d/nvidia-tegra.conf

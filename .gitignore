@@ -74,3 +74,4 @@ kernel-modules-clang/
 *.tar.gz
 *.raw
 *.raw.zst
+kubeconfig-agx

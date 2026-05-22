@@ -113,17 +113,14 @@ data:
         echo '  - name: "0"'
         echo '    containerEdits:'
         echo '      deviceNodes:'
-        # Device strategy: inject nvgpu/* devices + /dev/nvhost-ctrl (shim).
+        # Device strategy: inject all nvgpu/* devices + /dev/dri/renderD128.
         #
-        # /dev/nvhost-ctrl is provided by nvhost_ctrl_shim.ko which implements
-        # NVHOST_IOCTL_CTRL_SYNC_FENCE_CREATE and NVHOST_IOCTL_CTRL_SYNC_FILE_EXTRACT
-        # over the OOT host1x syncpoint API. This allows JetPack 6 libnvrm_host1x.so
-        # to use hardware syncpoint interrupts for cudaStreamSynchronize instead of
-        # CPU semaphore busy-polling — expected to increase decode throughput 3-4x.
+        # /dev/dri/renderD128 is the DRM render node created by tegra-drm.ko (OE4T build).
+        # JetPack 6 libcuda.so opens this node during cuInit to enumerate the iGPU.
+        # Without it, cuInit returns 801 (CUDA_ERROR_NOT_SUPPORTED).
         #
-        # We do NOT inject /dev/nvhost-gpu or other nvhost-* devices: GPU channel
-        # submission continues to go through nvgpu/igpu0/*, and the shim only handles
-        # the syncpoint wait/extract path.
+        # /dev/nvhost-ctrl is only injected when a real char device exists (shim loaded).
+        # The fallback symlink (→ /dev/nvgpu/igpu0/ctrl) is excluded: CDI rejects symlinks.
 
         # All /dev/nvgpu/igpu0/* char devices
         for dev in $(find /dev/nvgpu/igpu0/ -type c 2>/dev/null | sort); do
@@ -177,17 +174,15 @@ data:
     echo "[cdi-setup] Redirecting firmware_class.path -> /var/fw-fresh"
     echo -n '/var/fw-fresh' > /sys/module/firmware_class/parameters/path
 
-    # ── Device symlink (fallback only) ────────────────────────────────────
-    # nvhost_ctrl_shim.ko creates /dev/nvhost-ctrl as a proper char device.
-    # Only create the legacy symlink if the shim is not loaded (fallback for
-    # kernels without the shim, so cuInit still succeeds without nvhost mode).
+    # ── Device symlink (legacy compat only) ───────────────────────────────
+    # Create /dev/nvhost-ctrl symlink → /dev/nvgpu/igpu0/ctrl for any legacy
+    # code that still opens /dev/nvhost-ctrl. Does not affect CUDA (which uses
+    # /dev/dri/renderD128 via tegra-drm). CDI does not inject this symlink.
     if [ ! -c /dev/nvhost-ctrl ] && [ ! -L /dev/nvhost-ctrl ]; then
       if [ -e /dev/nvgpu/igpu0/ctrl ]; then
         ln -sf /dev/nvgpu/igpu0/ctrl /dev/nvhost-ctrl
-        echo "[cdi-setup] nvhost-ctrl-shim not loaded — fallback symlink: /dev/nvhost-ctrl -> nvgpu ctrl"
+        echo "[cdi-setup] created /dev/nvhost-ctrl symlink (legacy compat)"
       fi
-    else
-      echo "[cdi-setup] /dev/nvhost-ctrl present (shim device or existing symlink) — no action needed"
     fi
 
     # ── Device permissions (dynamic — covers NVHOST=n and NVHOST=y) ───────
