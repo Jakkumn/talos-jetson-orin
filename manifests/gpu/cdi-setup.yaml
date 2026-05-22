@@ -135,11 +135,19 @@ data:
           printf '        - path: /dev/nvmap\n          permissions: rw\n'
         fi
 
-        # /dev/nvhost-ctrl: provided by nvhost_ctrl_shim.ko (real NVHOST ioctl interface).
-        # Inject directly — no hostPath override needed since the shim creates the
-        # device node on the host as a proper char device (not a symlink to nvgpu ctrl).
-        if [ -c /dev/nvhost-ctrl ]; then
+        # /dev/nvhost-ctrl: only inject when it is a real char device (shim loaded).
+        # The fallback symlink created when shim is absent (→ /dev/nvgpu/igpu0/ctrl)
+        # must NOT be injected: CDI rejects symlinks with "not a device node".
+        # /dev/nvgpu/igpu0/ctrl is already in the spec above, so nothing is lost.
+        if [ -c /dev/nvhost-ctrl ] && [ ! -L /dev/nvhost-ctrl ]; then
           printf '        - path: /dev/nvhost-ctrl\n          permissions: rw\n'
+        fi
+
+        # /dev/dri/renderD128: DRM render node created by tegra-drm.ko (OE4T build).
+        # Required by JetPack 6 libcuda.so for GPU enumeration on Tegra (cuInit).
+        # Inject only when the node actually exists (requires tegra-drm extension).
+        if [ -c /dev/dri/renderD128 ]; then
+          printf '        - path: /dev/dri/renderD128\n          permissions: rw\n'
         fi
         echo '      mounts:'
         echo '        # Bind-mount the entire JetPack r36.5 library directory.'
