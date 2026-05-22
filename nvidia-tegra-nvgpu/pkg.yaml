@@ -23,12 +23,6 @@ steps:
         destination: hwpm.tar.gz
         sha256: "96c7656bdad0bf330e7fd58981b8a4eec4717a76840cefbe84e720d88b46be55"
         sha512: "971b91fcae284c59dbe411356109bce9b1a7884b8fac41c9683c79bf3eddef606e71ebaa9c06ad2389b2ba382c3c1125fabe0cbaeb5edac857e218077ed24ef9"
-      # nvhost-ctrl-shim: /dev/nvhost-ctrl with NVHOST ioctl API (bridges to OOT host1x)
-      # Pinned to commit 261ad19 — update url+sha when nvhost_ctrl_shim.c changes
-      - url: https://raw.githubusercontent.com/schwankner/talos-jetson-orin/261ad19/nvhost-ctrl-shim/nvhost_ctrl_shim.c
-        destination: nvhost_ctrl_shim.c
-        sha256: "c3e63583f49350bd8f43e9ec0c4459e7ca315c5aeb8acb850f3e38b2a7c53db3"
-        sha512: "681887e71f0d5a379b5000209ae3c8085cac3936bda8404bd2749b0f33ddb0b1d5139869a04a5bde370fce78a734ca572af6581e484512e924ae32d831a23c65"
     env:
       ARCH: arm64
       LLVM: "1"
@@ -42,10 +36,6 @@ steps:
         tar xzf hwpm.tar.gz -C /oot-src/hwpm --strip-components=1
         echo "Sources extracted:"
         ls /oot-src/
-        # nvhost-ctrl-shim C source (fetched by bldr, available as nvhost_ctrl_shim.c)
-        mkdir -p /oot-src/nvhost-ctrl-shim
-        cp nvhost_ctrl_shim.c /oot-src/nvhost-ctrl-shim/nvhost_ctrl_shim.c
-        echo "nvhost-ctrl-shim source ready ($(wc -l < /oot-src/nvhost-ctrl-shim/nvhost_ctrl_shim.c) lines)"
     build:
       - |
         echo "Building NVIDIA conftest (kernel compat detection)..."
@@ -230,30 +220,202 @@ steps:
         cat ${NVIDIA_OOT}/drivers/gpu/host1x-fence/Module.symvers \
           >> /oot-src/out/nvidia-linux-header/Module.symvers.nvidia 2>/dev/null || true
 
-        # ── nvhost-ctrl-shim: provides /dev/nvhost-ctrl with NVHOST ioctl API ──
-        # Bridges NVHOST_IOCTL_CTRL_SYNC_FENCE_CREATE / SYNC_FILE_EXTRACT to the
-        # OOT host1x syncpoint kernel API so libnvrm_host1x.so (JetPack 6 CUDA
-        # runtime) can use hardware syncpoint interrupts for cudaStreamSynchronize
-        # instead of CPU semaphore busy-polling. Symbol deps: host1x.ko only.
-        echo "=== Building nvhost-ctrl-shim ==="
-        SHIM_DIR=/oot-src/nvhost-ctrl-shim
-        mkdir -p "${SHIM_DIR}"
-        # Makefile — use printf (heredocs incompatible with YAML literal blocks)
-        printf 'obj-m += nvhost_ctrl_shim.o\nccflags-y += -I$(src)/../nvidia-oot/drivers/gpu/host1x/include\n' \
-          > "${SHIM_DIR}/Makefile"
-        # C source — pre-fetched by bldr (sources: entry), available at /oot-src/nvhost-ctrl-shim/
-        echo "nvhost-ctrl-shim: source ready ($(wc -l < "${SHIM_DIR}/nvhost_ctrl_shim.c") lines)"
-        make -j$(nproc) ARCH=arm64 \
+        # ── host1x-nvhost: legacy /dev/nvhost-* device nodes (bridge layer) ──
+        # OE4T host1x-nvhost.ko provides /dev/nvhost-ctrl-* style devices.
+        # See OE4T/linux-nv-oot drivers/gpu/host1x-nvhost/.
+        echo "=== Building OOT host1x-nvhost ==="
+        sed -i 's|ccflags-y += -Werror||g' \
+          ${NVIDIA_OOT}/drivers/gpu/host1x-nvhost/Makefile
+        printf 'ccflags-y += -I$(srctree.nvconftest)\n' \
+          >> ${NVIDIA_OOT}/drivers/gpu/host1x-nvhost/Makefile
+        printf 'ccflags-y += -I$(srctree.nvidia-oot)/include\n' \
+          >> ${NVIDIA_OOT}/drivers/gpu/host1x-nvhost/Makefile
+        printf 'ccflags-y += -I$(srctree.nvidia-oot)/drivers/gpu/host1x/include\n' \
+          >> ${NVIDIA_OOT}/drivers/gpu/host1x-nvhost/Makefile
+        printf 'ccflags-y += -include $(srctree)/include/generated/uapi/linux/version.h\n' \
+          >> ${NVIDIA_OOT}/drivers/gpu/host1x-nvhost/Makefile
+        # Kernel 6.4: class_create(THIS_MODULE, name) -> class_create(name).
+        # Conftest probe for NV_CLASS_CREATE_HAS_NO_OWNER_ARG is unreliable
+        # under Clang/-Werror; replace with LINUX_VERSION_CODE guard.
+        grep -rl "NV_CLASS_CREATE_HAS_NO_OWNER_ARG" ${NVIDIA_OOT}/drivers/gpu/host1x-nvhost/ \
+          | xargs -r sed -i "s|#if defined(NV_CLASS_CREATE_HAS_NO_OWNER_ARG)|#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,4,0)|g"
+        make -j $(nproc) ARCH=arm64 \
           -C /src \
-          M="${SHIM_DIR}" \
+          M=${NVIDIA_OOT}/drivers/gpu/host1x-nvhost \
           CC=/usr/local/bin/clang-oot \
+          CONFIG_TEGRA_OOT_MODULE=m \
+          srctree.nvidia-oot=${NVIDIA_OOT} \
+          srctree.nvconftest=${NVIDIA_CONFTEST} \
           LLVM=1 \
           KBUILD_EXTRA_SYMBOLS=/oot-src/out/nvidia-linux-header/Module.symvers.nvidia \
-          modules 2>&1 | tee /tmp/build-nvhost-ctrl-shim.log
-        [[ ${PIPESTATUS[0]} -eq 0 ]] && echo "nvhost-ctrl-shim: OK" \
-          || { echo "=== nvhost-ctrl-shim BUILD FAILED ==="; cat /tmp/build-nvhost-ctrl-shim.log; exit 1; }
-        cat "${SHIM_DIR}/Module.symvers" \
+          modules 2>&1 | tee /tmp/build-host1x-nvhost.log; [[ ${PIPESTATUS[0]} -eq 0 ]] && echo "host1x-nvhost: OK" || { echo "host1x-nvhost: BUILD FAILED (see errors above)"; exit 1; }
+        cat ${NVIDIA_OOT}/drivers/gpu/host1x-nvhost/Module.symvers \
           >> /oot-src/out/nvidia-linux-header/Module.symvers.nvidia 2>/dev/null || true
+
+        # ── linux-hwpm: provides tegra_soc_hwpm_ip_register/unregister ──
+        # tegra-drm/hwpm.c (and virt.c) call into nvhwpm.ko. Build it from
+        # the OE4T linux-hwpm repo we already extracted to /oot-src/hwpm.
+        echo "=== Building OOT linux-hwpm (nvhwpm.ko) ==="
+        HWPM_DIR=/oot-src/hwpm/drivers/tegra/hwpm
+        sed -i 's|ccflags-y += -Werror||g' ${HWPM_DIR}/Makefile 2>/dev/null || true
+        printf 'ccflags-y += -include $(srctree)/include/generated/uapi/linux/version.h\n' \
+          >> ${HWPM_DIR}/Makefile
+        # Patch conftest macros same as host1x/tegra-drm
+        # Conftest macros (same kernel-version mapping as host1x/tegra-drm)
+        for entry in \
+          "NV_PLATFORM_DRIVER_STRUCT_REMOVE_RETURNS_VOID|6,11,0" \
+          "NV_CLASS_STRUCT_DEVNODE_HAS_CONST_DEV_ARG|6,2,0" \
+          "NV_CLASS_CREATE_HAS_NO_OWNER_ARG|6,4,0" \
+          "NV_IOMMU_MAP_HAS_GFP_ARG|6,3,0"; do
+          macro="${entry%|*}"; ver="${entry#*|}"
+          { grep -rl "${macro}" ${HWPM_DIR} 2>/dev/null || true; } | while read -r f; do
+            sed -i \
+              -e "s|#if defined(${macro})|#if LINUX_VERSION_CODE >= KERNEL_VERSION(${ver})|g" \
+              -e "s|#if !defined(${macro})|#if LINUX_VERSION_CODE < KERNEL_VERSION(${ver})|g" \
+              -e "s|#elif defined(${macro})|#elif LINUX_VERSION_CODE >= KERNEL_VERSION(${ver})|g" \
+              -e "s|#elif !defined(${macro})|#elif LINUX_VERSION_CODE < KERNEL_VERSION(${ver})|g" \
+              "${f}"
+          done
+        done
+        { grep -rl "NV_DEVM_TEGRA_CORE_DEV_INIT_OPP_TABLE_COMMON_PRESENT" ${HWPM_DIR} 2>/dev/null || true; } | while read -r f; do
+          sed -i "s|#if defined(NV_DEVM_TEGRA_CORE_DEV_INIT_OPP_TABLE_COMMON_PRESENT)|#if 1 /* OE4T: always present */|g" "${f}"
+        done
+        # Kernel 6.5+: get_user_pages() dropped the trailing 'vmas' (struct vm_area_struct **)
+        # parameter. The hwpm source still passes NULL as a 5th arg. Strip it.
+        # See linux commit 54d020692b34 ("mm/gup: remove unused vmas parameter from get_user_pages()").
+        # Use sed -z (slurp mode) since the call spans multiple lines, then
+        # match the specific pattern ", NULL)" right after hwpm->alist_map->pages.
+        sed -i -z 's|hwpm->alist_map->pages, NULL)|hwpm->alist_map->pages)|g' \
+          ${HWPM_DIR}/os/linux/mem_mgmt_utils.c 2>/dev/null || true
+        make -j $(nproc) ARCH=arm64 \
+          -C /src \
+          M=${HWPM_DIR} \
+          CC=/usr/local/bin/clang-oot \
+          CONFIG_TEGRA_OOT_MODULE=m \
+          srctree.nvidia-oot=${NVIDIA_OOT} \
+          srctree.nvconftest=${NVIDIA_CONFTEST} \
+          srctree.hwpm=/oot-src/hwpm \
+          LLVM=1 \
+          KBUILD_EXTRA_SYMBOLS=/oot-src/out/nvidia-linux-header/Module.symvers.nvidia \
+          modules 2>&1 | tee /tmp/build-hwpm.log; [[ ${PIPESTATUS[0]} -eq 0 ]] && echo "linux-hwpm: OK" || { echo "linux-hwpm: BUILD FAILED (see errors above)"; exit 1; }
+        cat ${HWPM_DIR}/Module.symvers \
+          >> /oot-src/out/nvidia-linux-header/Module.symvers.nvidia 2>/dev/null || true
+
+        # ── tegra-drm: OE4T DRM driver compatible with patched host1x ABI ──
+        # Builds /dev/dri/renderD128 so libcuda can enumerate the iGPU.
+        # Headless: CONFIG_DRM_TEGRA_HAVE_DISPLAY=n (no DP/DSI/HDMI).
+        echo "=== Building OOT tegra-drm (headless / render-node only) ==="
+        sed -i 's|ccflags-y += -Werror||g' \
+          ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Makefile 2>/dev/null || true
+        printf 'ccflags-y += -I$(srctree.nvconftest)\n' \
+          >> ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Makefile
+        printf 'ccflags-y += -I$(srctree.nvidia-oot)/include\n' \
+          >> ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Makefile
+        printf 'ccflags-y += -I$(srctree.nvidia-oot)/drivers/gpu/host1x/include\n' \
+          >> ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Makefile
+        printf 'ccflags-y += -include $(srctree)/include/generated/uapi/linux/version.h\n' \
+          >> ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Makefile
+        # Force-stub tegra_fbdev_setup in drm.h. The host kernel sets
+        # CONFIG_DRM_FBDEV_EMULATION=y in auto.conf, which is included via
+        # -include linux/autoconf.h — '-U' on ccflags doesn't override it.
+        # Replace '#ifdef CONFIG_DRM_FBDEV_EMULATION' in drm.h with '#if 0'
+        # so the inline stub branch is always picked. We skip fbdev.c in
+        # the Makefile because its drm_fb_helper internals broke heavily
+        # between 6.0 and 6.18.
+        sed -i 's|#ifdef CONFIG_DRM_FBDEV_EMULATION|#if 0 /* fbdev not needed for headless CUDA */|g' \
+          ${NVIDIA_OOT}/drivers/gpu/drm/tegra/drm.h
+        # Replace conftest probe macros with LINUX_VERSION_CODE guards.
+        # Conftest probes are unreliable with Clang/-Werror; explicit version
+        # checks are deterministic. Target kernel: 6.18.24-talos.
+        TEGRA_DRM=${NVIDIA_OOT}/drivers/gpu/drm/tegra
+        # Generic substitution helper for kernel-version-gated PRESENT/ARG macros
+        # Format: macro|kernel_version
+        for entry in \
+          "NV_IOMMU_MAP_HAS_GFP_ARG|6,3,0" \
+          "NV_IOMMU_PAGING_DOMAIN_ALLOC_PRESENT|6,11,0" \
+          "NV_VM_AREA_STRUCT_HAS_CONST_VM_FLAGS|6,3,0" \
+          "NV_APERTURE_REMOVE_ALL_CONFLICTING_DEVICES_PRESENT|6,0,0" \
+          "NV_FOP_UNSIGNED_OFFSET_PRESENT|6,12,0" \
+          "NV_DRM_DRM_CLIENT_SETUP_H_PRESENT|6,13,0" \
+          "NV_DRM_CLIENTS_DRM_CLIENT_SETUP_H_PRESENT|6,14,0" \
+          "NV_DRM_HELPER_MODE_FILL_FB_STRUCT_HAS_INFO_ARG|6,17,0" \
+          "NV_DRM_MODE_CONFIG_FUNCS_STRUCT_FB_CREATE_HAS_INFO_ARG|6,17,0" \
+          "NV_DRM_APERTURE_REMOVE_FRAMEBUFFERS_HAS_NO_PRIMARY_ARG|6,5,0" \
+          "NV_DRM_DEBUGFS_REMOVE_FILES_HAS_ROOT_ARG|6,7,0" \
+          "NV_DRM_CONNECTOR_HELPER_FUNCS_STRUCT_MODE_VALID_HAS_CONST_ARG|6,15,0" \
+          "NV_DRM_DISPLAY_INFO_STRUCT_HAS_SOURCE_PHYSICAL_ADDRESS|6,7,0" \
+          "NV_DEVM_PM_DOMAIN_ATTACH_LIST_PRESENT|6,13,0" \
+          "NV_DRM_DP_LINK_POWER_UP_PRESENT|6,16,0" \
+          "NV_CLK_HW_DETERMINE_RATE_NO_REPARENT_PRESENT|6,4,0" \
+          "NV_BUS_TYPE_STRUCT_MATCH_HAS_CONST_DRV_ARG|6,8,0" \
+          "NV_BUS_TYPE_STRUCT_UEVENT_HAS_CONST_DEV_ARG|6,11,0" \
+          "NV_PLATFORM_DRIVER_STRUCT_REMOVE_RETURNS_VOID|6,11,0"; do
+          macro="${entry%|*}"; ver="${entry#*|}"
+          # Cover all four #if forms: defined, !defined, elif defined, elif !defined.
+          # When the macro maps to "kernel >= ver", defined() is TRUE iff kernel >= ver.
+          { grep -rl "${macro}" ${TEGRA_DRM} 2>/dev/null || true; } | while read -r f; do
+            sed -i \
+              -e "s|#if defined(${macro})|#if LINUX_VERSION_CODE >= KERNEL_VERSION(${ver})|g" \
+              -e "s|#if !defined(${macro})|#if LINUX_VERSION_CODE < KERNEL_VERSION(${ver})|g" \
+              -e "s|#elif defined(${macro})|#elif LINUX_VERSION_CODE >= KERNEL_VERSION(${ver})|g" \
+              -e "s|#elif !defined(${macro})|#elif LINUX_VERSION_CODE < KERNEL_VERSION(${ver})|g" \
+              "${f}"
+          done
+        done
+        # Macros for APIs REMOVED in newer kernels (inverse logic):
+        for entry in \
+          "NV_DRM_DRIVER_HAS_FBDEV_PROBE|6,13,0" \
+          "NV_DRM_DRIVER_STRUCT_HAS_DATE|6,14,0" \
+          "NV_DRM_DRIVER_STRUCT_HAS_IRQ_ENABLED_ARG|6,4,0" \
+          "NV_DRM_APERTURE_REMOVE_FRAMEBUFFERS_HAS_DRM_DRIVER_ARG|6,0,0"; do
+          macro="${entry%|*}"; ver="${entry#*|}"
+          # For removed-in-newer-kernel macros: defined() means "still present", i.e. kernel < ver.
+          { grep -rl "${macro}" ${TEGRA_DRM} 2>/dev/null || true; } | while read -r f; do
+            sed -i \
+              -e "s|#if defined(${macro})|#if LINUX_VERSION_CODE < KERNEL_VERSION(${ver})|g" \
+              -e "s|#if !defined(${macro})|#if LINUX_VERSION_CODE >= KERNEL_VERSION(${ver})|g" \
+              -e "s|#elif defined(${macro})|#elif LINUX_VERSION_CODE < KERNEL_VERSION(${ver})|g" \
+              -e "s|#elif !defined(${macro})|#elif LINUX_VERSION_CODE >= KERNEL_VERSION(${ver})|g" \
+              "${f}"
+          done
+        done
+        # Always-present in 6.18 (OE4T-tested macros): set to 1
+        for macro in \
+          NV_LINUX_IOSYS_MAP_H_PRESENT \
+          NV_TEGRA_DEV_IOMMU_GET_STREAM_ID_PRESENT \
+          NV_DEVM_TEGRA_CORE_DEV_INIT_OPP_TABLE_COMMON_PRESENT; do
+          { grep -rl "${macro}" ${TEGRA_DRM} 2>/dev/null || true; } | while read -r f; do
+            sed -i \
+              -e "s|#if defined(${macro})|#if 1 /* OE4T: always present */|g" \
+              -e "s|#if !defined(${macro})|#if 0 /* OE4T: always present */|g" \
+              -e "s|#elif defined(${macro})|#elif 1 /* OE4T: always present */|g" \
+              -e "s|#elif !defined(${macro})|#elif 0 /* OE4T: always present */|g" \
+              "${f}"
+          done
+        done
+        echo "Patched tegra-drm: LINUX_VERSION_CODE guards for kernel 6.18"
+        # CONFIG_DRM_FBDEV_EMULATION=n on the Makefile side (no fbdev.o built)
+        # plus -UCONFIG_DRM_FBDEV_EMULATION in ccflags (above) so the C code
+        # sees the stub. We do NOT want fbdev.c — it requires drm_fb_helper
+        # APIs that broke heavily between kernel 6.0 and 6.18.
+        make -j $(nproc) ARCH=arm64 \
+          -C /src \
+          M=${NVIDIA_OOT}/drivers/gpu/drm/tegra \
+          CC=/usr/local/bin/clang-oot \
+          CONFIG_TEGRA_OOT_MODULE=m \
+          CONFIG_DRM_TEGRA_HAVE_DISPLAY=n \
+          CONFIG_DRM_FBDEV_EMULATION=n \
+          srctree.nvidia-oot=${NVIDIA_OOT} \
+          srctree.nvconftest=${NVIDIA_CONFTEST} \
+          srctree.hwpm=/oot-src/hwpm \
+          LLVM=1 \
+          KBUILD_EXTRA_SYMBOLS=/oot-src/out/nvidia-linux-header/Module.symvers.nvidia \
+          modules 2>&1 | tee /tmp/build-tegra-drm.log; [[ ${PIPESTATUS[0]} -eq 0 ]] && echo "tegra-drm: OK" || { echo "tegra-drm: BUILD FAILED (see errors above)"; exit 1; }
+        cat ${NVIDIA_OOT}/drivers/gpu/drm/tegra/Module.symvers \
+          >> /oot-src/out/nvidia-linux-header/Module.symvers.nvidia 2>/dev/null || true
+
+        # nvhost-ctrl-shim not built — CUDA works via DRM render node (/dev/dri/renderD128)
+        # to test whether OE4T tegra-drm + host1x-nvhost alone enable GPU on
 
         # ── nvmap: provides tegra_vpr_dev, nvmap_dma_alloc_attrs, nvmap_dma_free_attrs ──
         echo "=== Building nvmap ==="
@@ -389,8 +551,20 @@ steps:
         # host1x-fence goes to extra/ (no in-tree equivalent)
         find /oot-src/nvidia-oot/drivers/gpu/host1x-fence -name "*.ko" \
           -exec install -m 644 {} /rootfs/usr/lib/modules/${KERNEL_RELEASE}/extra/nvidia-tegra/ \;
-        # nvhost-ctrl-shim: provides real /dev/nvhost-ctrl for CUDA stream sync
-        find /oot-src/nvhost-ctrl-shim -name "*.ko" \
+
+        # OE4T tegra-drm: also install at the kernel/drivers/gpu/drm/tegra path
+        # so modprobe finds OUR tegra-drm.ko (built against OE4T host1x ABI) instead
+        # of the vanilla Talos kernel's tegra-drm.ko (built against vanilla host1x).
+        # Otherwise depmod creates 'kernel/drivers/gpu/drm/tegra/tegra-drm.ko: kernel/drivers/gpu/host1x/host1x.ko'
+        # which points modprobe at the WRONG tegra-drm.ko, failing with
+        # 'tegra_drm: disagrees about version of symbol host1x_job_alloc'.
+        mkdir -p /rootfs/usr/lib/modules/${KERNEL_RELEASE}/kernel/drivers/gpu/drm/tegra
+        find /oot-src/nvidia-oot/drivers/gpu/drm/tegra -name "tegra-drm.ko" \
+          -exec install -m 644 {} /rootfs/usr/lib/modules/${KERNEL_RELEASE}/kernel/drivers/gpu/drm/tegra/ \;
+
+        # nvhwpm.ko lives in /oot-src/hwpm/, NOT /oot-src/nvidia-oot/. The generic
+        # find below misses it — install explicitly.
+        find /oot-src/hwpm -name "nvhwpm.ko" \
           -exec install -m 644 {} /rootfs/usr/lib/modules/${KERNEL_RELEASE}/extra/nvidia-tegra/ \;
 
         # All nvidia-oot modules go to extra/ as usual
@@ -425,12 +599,13 @@ steps:
         # host1x provides syncpoint alloc; host1x-fence provides fence extract;
         # nvmap provides GPU memory; mc-utils provides emc_freq_to_bw; nvgpu last.
         mkdir -p /rootfs/usr/lib/modprobe.d
-        # Load order: host1x → host1x-fence → nvhost-ctrl-shim → nvmap → nvgpu
-        # nvhost-ctrl-shim depends on host1x (syncpoint API), must load before nvgpu
-        # so /dev/nvhost-ctrl exists when libcuda.so opens it during cuInit.
-        printf 'softdep nvhost-ctrl-shim pre: host1x host1x-fence\n' \
+        # Load order: host1x → host1x-fence → host1x-nvhost → tegra-drm → nvmap → nvgpu
+        # tegra-drm registers /dev/dri/renderD128 so libcuda can enumerate the iGPU.
+        # nvhost-ctrl-shim not installed — CUDA uses /dev/dri/renderD128 via tegra-drm.ko.
+        # cleanly test whether DRM alone makes GPU work on Talos+OE4T.
+        printf 'softdep tegra-drm pre: host1x host1x-fence host1x-nvhost\n' \
           > /rootfs/usr/lib/modprobe.d/nvidia-tegra.conf
-        printf 'softdep nvgpu pre: host1x nvmap host1x-fence nvhost-ctrl-shim mc-utils\n' \
+        printf 'softdep nvgpu pre: host1x nvmap host1x-fence host1x-nvhost tegra-drm mc-utils\n' \
           >> /rootfs/usr/lib/modprobe.d/nvidia-tegra.conf
 
         # Also export vmlinuz.efi + signing key so the build script can build
