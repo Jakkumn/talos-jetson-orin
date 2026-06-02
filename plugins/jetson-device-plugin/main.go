@@ -1,24 +1,32 @@
 // jetson-device-plugin — minimal CDI-native GPU device plugin for Jetson Orin
 //
-// Exposes nvidia.com/gpu: 1 as a Kubernetes extended resource.
-// On Allocate(), returns CDIDevices: [{Name: "nvidia.com/gpu=0"}] so that
-// containerd 2.x reads /var/run/cdi/nvidia-jetson.yaml and automatically
-// injects all nvgpu + nvhost device nodes, JetPack r36.5 lib bind-mount,
-// and LD_LIBRARY_PATH into the container — no hostPath mounts needed.
+// Exposes nvidia.com/gpu: N (configurable via REPLICA_COUNT env var, default 1)
+// as a Kubernetes extended resource. On Allocate(), returns
+// CDIDevices: [{Name: "nvidia.com/gpu=0"}] so that containerd 2.x reads
+// /var/run/cdi/nvidia-jetson.yaml and automatically injects all nvgpu +
+// nvhost device nodes, JetPack r36.5 lib bind-mount, and LD_LIBRARY_PATH
+// into the container — no hostPath mounts needed.
+//
+// REPLICA_COUNT enables GPU time-slicing — the physical iGPU is advertised
+// as N virtual slots, all backed by the same device + same CDI spec entry.
+// Multiple pods schedule concurrently; the CUDA driver time-slices at runtime
+// (same behavior as bare JetPack hosting multiple CUDA processes).
 //
 // GPU presence is detected by /dev/nvgpu/igpu0/ctrl (nvgpu 5.x, NVHOST=n).
 //
 // Build (linux/arm64):
-//   docker buildx build --platform linux/arm64 -t REGISTRY/jetson-device-plugin:v1.0.0 .
+//   docker buildx build --platform linux/arm64 -t REGISTRY/jetson-device-plugin:v1.1.0 .
 package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -39,6 +47,7 @@ const (
 // JetsonPlugin implements the Kubernetes Device Plugin gRPC interface.
 type JetsonPlugin struct {
 	v1beta1.UnimplementedDevicePluginServer
+	replicaCount int
 }
 
 func gpuHealth() string {
@@ -53,11 +62,23 @@ func (p *JetsonPlugin) GetDevicePluginOptions(_ context.Context, _ *v1beta1.Empt
 	return &v1beta1.DevicePluginOptions{}, nil
 }
 
-// ListAndWatch reports one GPU device and re-reports health every pollInterval.
+// ListAndWatch reports replicaCount virtual GPU devices (all backed by the
+// same physical Jetson iGPU via time-slicing) and re-reports health every
+// pollInterval. All replicas share the same health state.
 func (p *JetsonPlugin) ListAndWatch(_ *v1beta1.Empty, s v1beta1.DevicePlugin_ListAndWatchServer) error {
-	devices := []*v1beta1.Device{{ID: "igpu0", Health: v1beta1.Healthy}}
+	devices := make([]*v1beta1.Device, p.replicaCount)
+	for i := 0; i < p.replicaCount; i++ {
+		devices[i] = &v1beta1.Device{
+			ID:     fmt.Sprintf("igpu0-%d", i),
+			Health: v1beta1.Healthy,
+		}
+	}
+
 	for {
-		devices[0].Health = gpuHealth()
+		health := gpuHealth()
+		for _, d := range devices {
+			d.Health = health
+		}
 		if err := s.Send(&v1beta1.ListAndWatchResponse{Devices: devices}); err != nil {
 			return err
 		}
@@ -74,9 +95,16 @@ func (p *JetsonPlugin) GetPreferredAllocation(_ context.Context, _ *v1beta1.Pref
 //   - A sentinel DeviceSpec for /dev/nvgpu/igpu0/ctrl so kubelet tracks the device.
 //   - CDIDevices: [{Name: "nvidia.com/gpu=0"}] so containerd 2.x reads
 //     /var/run/cdi/nvidia-jetson.yaml and injects all GPU devices + libs.
+//
+// Safety guard: rejects requests for more than one GPU per container, since
+// time-sliced replicas all back the same physical device — allocating multiple
+// to a single container just hogs slots without providing extra compute.
 func (p *JetsonPlugin) Allocate(_ context.Context, r *v1beta1.AllocateRequest) (*v1beta1.AllocateResponse, error) {
 	var responses []*v1beta1.ContainerAllocateResponse
-	for range r.ContainerRequests {
+	for _, req := range r.ContainerRequests {
+		if len(req.DevicesIds) > 1 {
+			return nil, fmt.Errorf("requesting more than 1 %s per container is not supported (time-sliced single GPU)", resourceName)
+		}
 		responses = append(responses, &v1beta1.ContainerAllocateResponse{
 			Devices: []*v1beta1.DeviceSpec{{
 				ContainerPath: devicePath,
@@ -85,7 +113,7 @@ func (p *JetsonPlugin) Allocate(_ context.Context, r *v1beta1.AllocateRequest) (
 			}},
 			// CDI injection: containerd reads the spec at /var/run/cdi/nvidia-jetson.yaml
 			// and injects all nvgpu + nvhost devices, tegra lib bind-mount, LD_LIBRARY_PATH.
-			CDIDevices: []*v1beta1.CDIDevice{{
+			CdiDevices: []*v1beta1.CDIDevice{{
 				Name: cdiDevice,
 			}},
 		})
@@ -100,7 +128,15 @@ func (p *JetsonPlugin) PreStartContainer(_ context.Context, _ *v1beta1.PreStartC
 
 func main() {
 	log.SetFlags(log.Ltime | log.Lshortfile)
-	log.Printf("jetson-device-plugin starting: resource=%s cdi=%s", resourceName, cdiDevice)
+
+	replicaCount := 1
+	if v := os.Getenv("REPLICA_COUNT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			replicaCount = n
+		}
+	}
+	log.Printf("jetson-device-plugin starting: resource=%s cdi=%s replicas=%d",
+		resourceName, cdiDevice, replicaCount)
 
 	// Clean up any stale socket from previous run.
 	_ = os.Remove(pluginSock)
@@ -111,7 +147,7 @@ func main() {
 	}
 
 	srv := grpc.NewServer()
-	v1beta1.RegisterDevicePluginServer(srv, &JetsonPlugin{})
+	v1beta1.RegisterDevicePluginServer(srv, &JetsonPlugin{replicaCount: replicaCount})
 	go func() {
 		if err := srv.Serve(lis); err != nil {
 			log.Fatalf("gRPC server error: %v", err)
